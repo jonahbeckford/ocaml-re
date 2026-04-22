@@ -1,0 +1,125 @@
+# OCaml Re Examples
+
+This document contains verified, runnable examples of the `Re` library.
+Commands are executed in the OCaml REPL; the output below each command is
+the actual result, kept in sync automatically by `dune runtest`.
+
+## Setup
+
+Define the two printer helpers used throughout this document.
+`test_re` tests a pattern against a string and prints all group offsets.
+`t` tests a pattern and prints the full group match tree.
+
+  >>> let test_re ?pos ?len re s =
+  ...   match Re.exec_opt ?pos ?len (Re.compile re) s with
+  ...   | None -> Format.printf "Not_found@."
+  ...   | Some g ->
+  ...     let offsets = Re.Group.all_offset g in
+  ...     let items =
+  ...       Array.to_list offsets
+  ...       |> List.map (fun (a, b) -> Printf.sprintf "(%d, %d)" a b)
+  ...     in
+  ...     Format.printf "[| %s |]@." (String.concat "; " items)
+  val test_re : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
+
+  >>> let t re s =
+  ...   match Re.exec_opt (Re.compile re) s with
+  ...   | None -> Format.printf "<None>@."
+  ...   | Some g -> Format.printf "%a@." Re.Group.pp g
+  val t : Re.t -> string -> unit = <fun>
+
+## String and character patterns
+
+  # test_re (Re.str "a") "a" ;;
+  [| (0, 1) |]
+  # test_re (Re.str "a") "b" ;;
+  Not_found
+  # test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "a" ;;
+  [| (0, 1) |]
+  # test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "b" ;;
+  [| (0, 1) |]
+  # test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "c" ;;
+  Not_found
+
+## Sequences
+
+  # test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ab" ;;
+  [| (0, 2) |]
+  # test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ac" ;;
+  Not_found
+
+## Special patterns: empty and epsilon
+
+  # test_re Re.empty "" ;;
+  Not_found
+  # test_re Re.empty "a" ;;
+  Not_found
+  # test_re Re.epsilon "" ;;
+  [| (0, 0) |]
+  # test_re Re.epsilon "a" ;;
+  [| (0, 0) |]
+
+## Repetition
+
+  # test_re (Re.rep (Re.char 'a')) "" ;;
+  [| (0, 0) |]
+  # test_re (Re.rep (Re.char 'a')) "a" ;;
+  [| (0, 1) |]
+  # test_re (Re.rep (Re.char 'a')) "aa" ;;
+  [| (0, 2) |]
+  # test_re (Re.rep (Re.char 'a')) "b" ;;
+  [| (0, 0) |]
+
+## Line and word anchors
+
+  # test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ab" ;;
+  [| (0, 1) |]
+  # test_re (Re.seq [ Re.bol; Re.char 'a' ]) "b\na" ;;
+  [| (2, 3) |]
+  # test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ba" ;;
+  Not_found
+  # test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba" ;;
+  [| (1, 2) |]
+  # test_re (Re.seq [ Re.char 'a'; Re.eol ]) "a\nb" ;;
+  [| (0, 1) |]
+  # test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ab" ;;
+  Not_found
+
+## String anchors
+
+  # test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ab" ;;
+  [| (0, 1) |]
+  # test_re (Re.seq [ Re.bos; Re.char 'a' ]) "b\na" ;;
+  Not_found
+  # test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba" ;;
+  [| (1, 2) |]
+  # test_re (Re.seq [ Re.char 'a'; Re.eos ]) "a\nb" ;;
+  Not_found
+
+## Option and repetition variants
+
+  # test_re (Re.opt (Re.char 'a')) "" ;;
+  [| (0, 0) |]
+  # test_re (Re.opt (Re.char 'a')) "a" ;;
+  [| (0, 1) |]
+  # test_re (Re.opt (Re.char 'a')) "b" ;;
+  [| (0, 0) |]
+  # test_re (Re.rep1 (Re.char 'a')) "" ;;
+  Not_found
+  # test_re (Re.rep1 (Re.char 'a')) "a" ;;
+  [| (0, 1) |]
+  # test_re (Re.rep1 (Re.char 'a')) "aa" ;;
+  [| (0, 2) |]
+
+## Groups
+
+  # t Re.empty "" ;;
+  <None>
+  # t Re.any "." ;;
+  (Group (. (0 1)))
+  # t (Re.group Re.any) "." ;;
+  (Group (. (0 1))(. (0 1)))
+  # t (Re.seq [ Re.group Re.any; Re.group Re.any ]) "ab" ;;
+  (Group (ab (0 2))(a (0 1))(b (1 2)))
+  # t (Re.seq [ Re.group Re.any; Re.group Re.any ]) "a" ;;
+  <None>

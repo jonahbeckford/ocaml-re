@@ -2,3 +2,34 @@
  (_
   (flags
    (:standard -w -50))))
+
+; Unified script: run EXAMPLES.md.ml.u through the OCaml REPL and capture output
+(rule
+ (target EXAMPLES.md.ml.u.actual)
+ (deps
+  EXAMPLES.md.ml.u
+  (glob_files lib/*.ml)
+  (glob_files lib/*.mli))
+ (action
+  (run
+   %{bin:UCramRunner}
+   EXAMPLES.md.ml.u
+   -o
+   %{target}
+   --workspace
+   %{workspace_root}
+   --load-with-dune
+   %{cma:lib/re})))
+
+; Validate that the committed EXAMPLES.md.ml.u matches actual REPL output
+(rule
+ (alias runtest)
+ (action
+  (diff EXAMPLES.md.ml.u EXAMPLES.md.ml.u.actual)))
+
+; Render EXAMPLES.md.ml.u to pretty Markdown documentation
+(rule
+ (target EXAMPLES.md)
+ (deps EXAMPLES.md.ml.u)
+ (action
+  (run %{bin:U2Markdown} EXAMPLES.md.ml.u -o %{target})))
