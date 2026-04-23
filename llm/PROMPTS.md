@@ -10,6 +10,10 @@
     Read the reference document  https://github.com/diskuv/dk/blob/V2_5/docs/UNIFIED_SCRIPTS.md and complete the writing of the project-based skill "make-literate-tests". The skill should be able to translate OCaml expect tests into unified scripts. The project has a large collection of expect scripts in lib_tests/expect. The skill should be able to convert all of those expect scripts into a single unified, runnable script "<projectroot>/EXAMPLES.md.ml.u". The skill should also have the dune "runtest" alias run the test commands in "<projectroot>/EXAMPLES.md.ml.u", and also have dune rules that render "<projectroot>/EXAMPLES.md.ml.u" into "<projectroot>/EXAMPLES.md".
     ```
 
+    That created:
+
+    - .claude/skills/make-literate-tests/SKILL.md
+
 4. Claude Sonnet 4.6 High prompt
 
     ```text
@@ -24,3 +28,5 @@
    - projectroot/.vscode/settings.json (auto-approvals)
    - projectroot/EXAMPLES.md.ml.u (very incomplete though!)
    - ~~projectroot/EXAMPLES.md~~ (oddly did not create this!)
+
+5. Rewrite SKILL.md by hand using the Claude-generated as a guide.

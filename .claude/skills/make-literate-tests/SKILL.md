@@ -129,45 +129,50 @@ A single, small sentence describing the test or how it differs from the last tes
 
 ### Inline Helper Definition
 
-Expect test files normally import a test-library module (`open Import`) with helpers that
-use `Format.printf` for output. Because the test library typically depends on `ppx_expect`,
-you cannot load it directly in the REPL. Instead, **redefine the helpers inline** in
-`EXAMPLES.md.ml.u`.
+Helper functions that wrap a test should be defined inline in the unified script, not imported from external modules. Helper functions should output Markdown code blocks for rectangular data.
 
-Here is a minimal two-helper setup suitable for a library named `Re` (adapt to your actual
-library namespace):
+For example, the expect tests may test the `Re.exec_opt` regular expression function:
+
+```ocaml
+module Re : sig
+  type t
+  type re
+  module Group : sig
+    val all_offset : t -> (int * int) array
+  end
+  val exec_opt
+    :  ?pos:int (** Default: 0 *)
+    -> ?len:int (** Default: -1 (until end of string) *)
+    -> re
+    -> string
+    -> Group.t option
+end
+```
+
+Here is a minimal helper inlined into a unified script that prints the offsets of all matched groups in a Markdown code block, with a metadata preamble saying what follows is Markdown:
 
 ```
-## Setup
+## Helpers
 
-  >>> let test_re ?pos ?len re s =
+  >>> let test_re_exec_opt ?pos ?len re s =
+  ...   Format.printf "%s" {|\markdown\;|};
   ...   match Re.exec_opt ?pos ?len (Re.compile re) s with
-  ...   | None -> Format.printf "Not_found@."
+  ...   | None -> Format.printf "%s@." "*not found*"
   ...   | Some g ->
+  ...     Format.printf "| Group | Offset |@."
+  ...     Format.printf "| --- | --- |@."
   ...     let offsets = Re.Group.all_offset g in
-  ...     let items =
-  ...       Array.to_list offsets
-  ...       |> List.map (fun (a, b) -> Printf.sprintf "(%d, %d)" a b)
-  ...     in
-  ...     Format.printf "[| %s |]@." (String.concat "; " items)
-  val test_re : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
-
-  >>> let t re s =
-  ...   match Re.exec_opt (Re.compile re) s with
-  ...   | None -> Format.printf "<None>@."
-  ...   | Some g -> Format.printf "%a@." Re.Group.pp g
-  val t : Re.t -> string -> unit = <fun>
+  ...     Array.to_list offsets
+  ...     |> List.iter (fun (a, b) -> Format.printf "| %d | %d |@." a b)
+  val test_re_exec_opt : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
 ```
 
-**Note**: The `val ... = <fun>` lines come from the OCaml REPL printing the type of each
-defined function. They must be included in `EXAMPLES.md.ml.u` as expected output. Run
-`UCramRunner` once to discover the exact text (see Step 3).
-
+**Note**: The `val ... = <fun>` unified script lines come from the OCaml REPL printing the type of each defined function. They must be included in `EXAMPLES.md.ml.u` as expected output. Run `UCramRunner` once to discover the exact text (see Step 3).
+  
 ### Content That Transfers Directly
 
-Only tests whose output helpers use `Format.printf` (or write to `Format.std_formatter`)
-can be converted without changes:
-- ✅ Helpers like `test_re`, `t` that call `Format.printf`
+Only tests whose output helpers use `Format.printf` (or write to `Format.std_formatter`) can be converted without changes:
+- ✅ Helpers like `test_re_exec_opt` that call `Format.printf`
 - ❌ Helpers that call `Printf.printf` or `print_endline` directly
 
 For tests using `Printf.printf`, either skip them or wrap the call:
@@ -179,125 +184,86 @@ let my_test arg = Format.printf "%s@." (compute_result arg)
 
 ## Step 3: Run UCramRunner to Fill in Responses
 
-On the first run, create `EXAMPLES.md.ml.u` with **commands only** and no response text.
-UCramRunner fills in the actual REPL output.
+On the first run, create `EXAMPLES.md.ml.u` without response text.
+`UCramRunner` fills in the actual REPL output.
 
-### Build the library first
-
-```bash
-opam exec -- dune build lib/
-```
-
-### Run UCramRunner manually
+### Build the project first
 
 ```bash
-opam exec -- UCramRunner EXAMPLES.md.ml.u \
-  --load-with-dune _build/default/lib/<LIBNAME>.cma \
-  -o EXAMPLES.md.ml.u.actual
+opam exec -- dune build
 ```
 
-Replace `<LIBNAME>` with the library name (e.g. `re`). `--load-with-dune` loads the `.cma`
-and also adds its Dune `.objs/byte` directory to the search path so all sub-modules resolve.
+### Autoconfigure UCramRunner
 
-### Review and promote
+Create `dune-examples.inc` by running:
 
-Inspect the `.actual` file to verify the responses match your original `[%expect]` blocks:
-```bash
-# Compare a few spot-checks against original tests
-diff EXAMPLES.md.ml.u EXAMPLES.md.ml.u.actual
-```
-Once satisfied, promote the actual output as the new expected baseline:
-```bash
-cp EXAMPLES.md.ml.u.actual EXAMPLES.md.ml.u
-rm  EXAMPLES.md.ml.u.actual   # remove it; dune owns this path from now on
-```
+1. Run `opam exec -- dune ocaml top <srcdir> | opam exec -- UDuneImport --disable-ocamlformat [options] .`:
+   - *REQUIRED*: The `<srcdir>` is the directory tree containing the `*.ml` modules to be tested.
+   - *RECOMMENDED*: There are two important options:
+     - `--package PACKAGE` is the name of the Dune `(package)` the `.ml.u` scripts will belong to. Pick using the main `(package (name ...))` stanza declared in the `dune-project` file.
+     - `--require-project-library PACKAGE1 --require-project-library PACKAGE2 ...` are the names of public or private libraries in the project that the `.ml.u` scripts depend on (even transitively). These are identified from `dune` files in the project that contain `(library (name ...))` stanzas.
+   - A full example is: `opam exec -- dune ocaml top src/MlFront_Cache/MlFront_Cache | opam exec -- UDuneImport.exe --package MlFront_Cache -o src/MlFront_Cache/dune-examples.inc --require-project-library MlFront_Core --disable-ocamlformat .`
+2. Create an empty `dune` file in the project root if it doesn't exist.
+3. Include the generated rules and render them in the project `dune` file:
 
----
+   ```scheme
+   (include dune-examples.inc)
 
-## Step 4: Create Dune Rules
-
-Add the following stanzas to the `dune` file in the same directory as `EXAMPLES.md.ml.u`
-(typically the project root). These are **additive**—they do not touch existing rules.
-
-```lisp
-; Execute the unified script and capture REPL output
-(rule
- (target EXAMPLES.md.ml.u.actual)
- (deps
-  EXAMPLES.md.ml.u
-  (glob_files lib/*.ml)
-  (glob_files lib/*.mli))
- (action
-  (run
-   %{bin:UCramRunner}
-   EXAMPLES.md.ml.u
-   -o %{target}
-   --workspace %{workspace_root}
-   --load-with-dune %{cma:lib/<LIBNAME>})))
-
-; Fail the build if the committed expected output differs from actual
-(rule
- (alias runtest)
- (action
-  (diff EXAMPLES.md.ml.u EXAMPLES.md.ml.u.actual)))
-
-; Render the unified script to pretty Markdown documentation
-(rule
- (target EXAMPLES.md)
- (deps EXAMPLES.md.ml.u)
- (action
-  (run %{bin:U2Markdown} EXAMPLES.md.ml.u -o %{target})))
-```
-
-Replace `<LIBNAME>` with the Dune library name. The `%{cma:lib/<LIBNAME>}` variable
-expands to the build-artifact `.cma` path for the workspace-local library.
+   (rule
+    (target EXAMPLES.actual.md)
+    (package <package-name>)
+    (deps EXAMPLES.md.ml.u)
+    (action
+     (run %{bin:U2Markdown} --toc -o %{target} %{deps})))
+   (rule
+    (alias runtest)
+    (package <package-name>)
+    (action
+    (diff EXAMPLES.md EXAMPLES.actual.md)))
+   ```
 
 **Rule summary:**
 
-| Rule | Effect |
-|------|--------|
-| First | Runs UCramRunner, writes real REPL output to `.actual` |
-| Second (runtest alias) | Diffs expected vs actual; fails if output changed |
-| Third | Renders `.ml.u` to pretty `EXAMPLES.md` via U2Markdown |
+| File | Rule | Effect |
+|------|------|--------|
+| generated `dune-examples.inc` | Target `EXAMPLES.md.ml.u` | Runs `UCramRunner` on `EXAMPLES.md.ml.u`, writes real REPL output to `.actual` |
+| generated `dune-examples.inc` | `runtest` alias | Diffs expected vs actual; fails if output changed |
+| manually added to `dune` | Third rule | Renders `.ml.u` to `EXAMPLES.md` via `U2Markdown` |
 
----
+### Review and promote
 
-## Step 5: Validate and Render
+Rerun the tests; Dune will print diffs for each test.
 
-Build the `.actual` file through Dune and confirm the diff is clean:
 ```bash
-opam exec -- dune build EXAMPLES.md.ml.u.actual
-diff EXAMPLES.md.ml.u _build/default/EXAMPLES.md.ml.u.actual
+opam exec -- dune build
 ```
 
-Render to Markdown:
-```bash
-opam exec -- dune build EXAMPLES.md
-cat _build/default/EXAMPLES.md
-```
+Compare the diff to see if the new response lines match your original `[%expect]` blocks.
 
-The Markdown output wraps each command in an `ocaml` fenced code block with syntax
-highlighting, and each response in a `text` block.
+Once satisfied, promote the actual output as the new expected baseline:
+
+```bash
+opam exec -- dune promote
+```
 
 ### Coexistence with existing tests
 
 Both PPX expect tests and unified script tests share the `runtest` alias.
 To run only the unified script tests (without needing ppx_expect installed):
+
 ```bash
-opam exec -- dune build EXAMPLES.md.ml.u.actual  # generation
-diff EXAMPLES.md.ml.u _build/default/EXAMPLES.md.ml.u.actual  # validation
+opam exec -- dune build EXAMPLES.md.ml.u  # generation
 ```
 
 ---
 
-## Step 6: Continuous Integration
+## Step 5: Continuous Integration
 
 ```yaml
 # Example: GitHub Actions
 - name: Build and validate unified examples
   run: |
-    dune build EXAMPLES.md.ml.u.actual
-    diff EXAMPLES.md.ml.u _build/default/EXAMPLES.md.ml.u.actual
+    dune build EXAMPLES.md.ml.u
 
 - name: Render documentation
   run: dune build EXAMPLES.md
@@ -310,7 +276,6 @@ diff EXAMPLES.md.ml.u _build/default/EXAMPLES.md.ml.u.actual  # validation
 | File | Purpose |
 |------|---------|
 | `EXAMPLES.md.ml.u` | Source unified script (committed) |
-| `EXAMPLES.md.ml.u.actual` | Built by dune; not committed |
 | `EXAMPLES.md` | Rendered Markdown (committed or generated) |
 | `dune` (root) | Location for the three new rules |
 
@@ -321,459 +286,31 @@ diff EXAMPLES.md.ml.u _build/default/EXAMPLES.md.ml.u.actual  # validation
 ### `UCramRunner` not found
 ```bash
 opam pin add UnifiedScript_Std https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
+opam pin add UnifiedScript_Top https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
 ```
 
 ### `[cram test failed]` on first run
-The `.ml.u` file has expected output that does not match. Either the code changed or the
+The `.md.ml.u` file has expected output that does not match. Either the code changed or the
 expected section was written incorrectly. Run UCramRunner manually (Step 3) to see what
 the actual output is, then promote it.
 
-### `Multiple rules generated` error from dune
-You left an `EXAMPLES.md.ml.u.actual` in the source tree. Dune wants to own that path:
-```bash
-rm EXAMPLES.md.ml.u.actual
-```
-
 ### `val foo = <fun>` lines missing
 When you define a helper with `>>>`, the REPL prints `val foo : ... = <fun>`. This must
-appear in `EXAMPLES.md.ml.u`. Run UCramRunner once with no expected output to discover
-the exact text.
+appear in `EXAMPLES.md.ml.u`. Run `dune build EXAMPLES-actual.md.ml.u` once with no expected output
+to discover the exact text.
 
 ### Output not captured (test helper uses `Printf.printf`)
 `UCramRunner` only captures `Format.std_formatter` output. Redefine the helper to use
 `Format.printf` instead, or use `Format.printf "%s@." (the_string ())`.
 
-### `%{cma:lib/LIBNAME}` dune variable fails
-Ensure the library has been built (`dune build lib/`) and that the name matches the
-`(name ...)` field in `lib/dune`. For a library named `re` in `lib/`, use `%{cma:lib/re}`.
+### `%{cma:the-lib-directory/LIBNAME}` dune variable fails
+Ensure the library has been built (`dune build the-lib-directory/`) and that the name matches the
+`(name ...)` field in `the-lib-directory/dune`. For a library named `re` in `lib/`, use `%{cma:lib/re}`.
 
 ---
 
 ## Further Resources
 
 - **Full reference**: https://github.com/diskuv/dk/blob/V2_5/docs/UNIFIED_SCRIPTS.md
-- **Repository**: https://github.com/diskuv/dk
-
-This skill guides you through converting OCaml expect tests into **unified scripts**—a format that combines executable code and expected output in a single, readable document that can be both run as tests and automatically rendered into beautiful documentation.
-
-## What Are Unified Scripts?
-
-Unified scripts are self-contained, executable documents. For OCaml projects, they use `.ml.u` files that:
-- Execute OCaml REPL commands with the `#` prompt (ending with `;;`)
-- Include expected output immediately after each command
-- Can be rendered into pretty Markdown documentation
-- Serve as both runnable tests and readable reference docs
-
-**Example snippet from `EXAMPLES.md.ml.u`:**
-```
-# let two_plus_two = 2 + 2 ;;
-val two_plus_two : int = 4
-
-# Printf.printf "Value: %d\n" two_plus_two ;;
-Value: 4
-- : unit = ()
-```
-
-When rendered to Markdown, this becomes syntax-highlighted code blocks with output.
-
-## Incremental Adoption: Coexistence Model
-
-This skill creates a **separate test artifact** (`EXAMPLES.md.ml.u`) that:
-- ✅ **Coexists** with existing `lib_test/expect/*.ml` expect tests
-- ✅ Runs independently via separate dune rules
-- ✅ Requires **no changes** to existing test infrastructure
-- ✅ Can be adopted incrementally—convert some or all expect tests
-- ✅ Produces rendered documentation (`EXAMPLES.md`) as a bonus
-
-Both test formats run in `dune runtest`. The old PPX-based expect tests continue unchanged; this workflow adds a new, complementary approach.
-
-## Project-Specific Goals
-
-Convert OCaml expect tests from `lib_test/expect/*.ml` into:
-- **Source**: `./EXAMPLES.md.ml.u` — unified script (both runnable test and source doc)
-- **Output**: `./EXAMPLES.md` — rendered Markdown (pretty documentation)
-
-The dune build system is configured to:
-1. Run `UCramRunner` to execute commands in `EXAMPLES.md.ml.u` and validate output
-2. Run `U2Markdown` to render `EXAMPLES.md.ml.u` into pretty `EXAMPLES.md`
-3. Include both as part of the existing `dune runtest` workflow
-
----
-
-## Step 1: Install the Unified Script Tools
-
-The unified script ecosystem requires two tools:
-- **UCramRunner** — Executes `.ml.u` scripts and validates outputs
-- **U2Markdown** — Renders unified scripts to pretty Markdown
-
-### Finding the OPAM Executable
-
-Determine which OPAM executable to use, in priority order:
-
-1. `build/d/opam.exe` (Windows executable)
-2. `build/d/opam.cmd` (Windows batch script)
-3. `build/d/opam.sh` (POSIX shell script)
-4. `opam` in the system PATH (fallback)
-
-### Installation Command
-
-Use `opam pin add` to install bleeding-edge versions from the latest MlFront release:
-
-```bash
-# Resolve OPAM executable
-OPAM_BIN="opam"
-[ -x build/d/opam.exe ] && OPAM_BIN="build/d/opam.exe"
-[ -x build/d/opam.cmd ] && OPAM_BIN="build/d/opam.cmd"
-[ -x build/d/opam.sh ] && OPAM_BIN="build/d/opam.sh"
-
-# Install tools
-$OPAM_BIN pin add UnifiedScript_Std https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
-$OPAM_BIN pin add UnifiedScript_Top https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
-```
-
-This installs `UCramRunner` and `U2Markdown` globally in your OPAM switch.
-
-**Verification:**
-```bash
-which UCramRunner    # Should show path to executable
-which U2Markdown     # Should show path to executable
-```
-
----
-
-## Step 2: Extract and Convert Expect Tests
-
-### Understanding Expect Test Format
-
-The project uses OCaml's ppx-based expect tests in `lib_test/expect/test_*.ml`:
-
-```ocaml
-let%expect_test "label" =
-  test_re (str "a") "a";
-  [%expect {| [| (0, 1) |] |}];
-  test_re (str "a") "b";
-  [%expect {| Not_found |}]
-;;
-```
-
-Each test is:
-1. A labeled test case (`let%expect_test "label"`)
-2. One or more function calls (e.g., `test_re`)
-3. `[%expect {| ... |}]` blocks capturing expected console output
-
-### Conversion Strategy
-
-Convert each expect test into OCaml REPL commands:
-
-1. **Load required modules**: `# open Import ;;` and `# open Re ;;`
-2. **Extract test code**: Copy the code before each `[%expect]` block
-3. **Convert output**: Transform `[%expect {| OUTPUT |}]` into REPL output lines
-
-**Conversion example:**
-
-**Original (expect test):**
-```ocaml
-let%expect_test "str_matching" =
-  test_re (str "a") "a";
-  [%expect {| [| (0, 1) |] |}]
-;;
-```
-
-**Converted (unified script):**
-```
-# open Import ;;
-# open Re ;;
-
-# test_re (str "a") "a" ;;
-[| (0, 1) |]
-```
-
-### Tool-Based Conversion (Python Automation)
-
-Use this Python script to automatically extract and convert expect tests:
-
-```python
-#!/usr/bin/env python3
-# file: convert_expect.py
-# Usage: python convert_expect.py
-
-import re
-import os
-from pathlib import Path
-
-def extract_expect_tests(file_content):
-    """Extract expect tests from OCaml file."""
-    tests = []
-    
-    # Match: let%expect_test "name" = ... [%expect {| output |}]
-    pattern = r'let%expect_test\s+"([^"]+)"\s*=\s*(.*?)\[%expect\s*\{\|\s*([^}]+)\s*\|\}\s*\]'
-    
-    for match in re.finditer(pattern, file_content, re.DOTALL):
-        name, body, expected = match.groups()
-        tests.append((name, body.strip(), expected.strip()))
-    
-    return tests
-
-def generate_unified_script(tests):
-    """Generate unified script from extracted tests."""
-    lines = []
-    lines.append("# OCaml Re Examples and Tests")
-    lines.append("")
-    lines.append("This document shows verified examples of using the Re library.")
-    lines.append("")
-    lines.append("  # open Import ;;")
-    lines.append("  # open Re ;;")
-    lines.append("")
-    
-    for name, body, expected in tests:
-        lines.append(f"## {name}")
-        lines.append("")
-        
-        # Extract just the function calls (skip let statement)
-        for line in body.split('\n'):
-            line = line.strip()
-            if line and not line.startswith('let%expect'):
-                # Format as REPL command
-                if not line.endswith(';;'):
-                    line += ' ;;'
-                lines.append(f"  # {line}")
-        
-        # Add expected output
-        lines.append(f"  {expected}")
-        lines.append("")
-    
-    return '\n'.join(lines)
-
-def main():
-    all_tests = []
-    
-    # Scan all test files
-    for file in sorted(os.listdir('lib_test/expect')):
-        if file.endswith('.ml') and file.startswith('test_'):
-            path = os.path.join('lib_test/expect', file)
-            with open(path, 'r') as f:
-                content = f.read()
-                tests = extract_expect_tests(content)
-                all_tests.extend(tests)
-    
-    # Generate unified script
-    script = generate_unified_script(all_tests)
-    
-    # Write output
-    with open('EXAMPLES.md.ml.u', 'w') as f:
-        f.write(script)
-    
-    print(f"Generated EXAMPLES.md.ml.u with {len(all_tests)} tests")
-
-if __name__ == '__main__':
-    main()
-```
-
-**To use the automation:**
-
-```bash
-python3 convert_expect.py
-```
-
-This produces `EXAMPLES.md.ml.u` automatically from the existing expect tests.
-
-### Manual Conversion (If Preferred)
-
-If you prefer manual conversion:
-
-1. Open each `lib_test/expect/test_*.ml` file
-2. For each `let%expect_test`:
-   - Add a markdown heading with the test name: `## Test Name`
-   - Extract the test body code
-   - Format as REPL commands: `  # code ;;`
-   - Add expected output prefixed with `  `
-3. Combine all into `EXAMPLES.md.ml.u`
-
-### Structure of EXAMPLES.md.ml.u
-
-Your completed file should look like:
-
-```
-# OCaml Re Examples and Tests
-
-This document contains verified examples of using the Re library.
-Running this script validates that all examples work correctly.
-
-  # open Import ;;
-  # open Re ;;
-
-## String Matching
-
-  # test_re (str "a") "a" ;;
-  [| (0, 1) |]
-
-  # test_re (str "a") "b" ;;
-  Not_found
-
-## Pattern Alternation
-
-  # test_re (alt [ char 'a'; char 'b' ]) "a" ;;
-  [| (0, 1) |]
-
-  # test_re (alt [ char 'a'; char 'b' ]) "c" ;;
-  Not_found
-```
-
----
-
-## Step 3: Create Dune Rules
-
-Add build rules to execute and render the unified script. Create a new `dune` file at the project root (or in the same directory as `EXAMPLES.md.ml.u`):
-
-```lisp
-; file: ./dune
-; Executes and validates the unified script
-
-(rule
- (target EXAMPLES.md.ml.u.actual)
- (deps EXAMPLES.md.ml.u
-       (package re)
-       (package base)
-       (package fmt))
- (action
-  (run UCramRunner EXAMPLES.md.ml.u
-       -o %{target}
-       --workspace %{workspace_root})))
-
-(rule
- (alias runtest)
- (name validate_examples)
- (action (diff EXAMPLES.md.ml.u EXAMPLES.md.ml.u.actual)))
-
-(rule
- (target EXAMPLES.md)
- (deps EXAMPLES.md.ml.u)
- (action
-  (run U2Markdown EXAMPLES.md.ml.u -o %{target})))
-```
-
-**Rule explanations:**
-
-1. **First rule** — Runs `UCramRunner` on `EXAMPLES.md.ml.u`, executes all commands, outputs results to `.actual`
-2. **Second rule** — Diffs original `.ml.u` against `.actual` to validate outputs match. Part of `runtest` alias
-3. **Third rule** — Renders the unified script to `EXAMPLES.md` using `U2Markdown`
-
----
-
-## Step 4: Run and Validate
-
-### Execute the Test Suite
-
-```bash
-dune runtest
-```
-
-**Expected output** if all tests pass:
-```
-Running 42 tests...
-All tests passed.
-```
-
-**If tests fail** (output changed):
-```
-Error: diff command returned non-zero exit code:
-  EXAMPLES.md.ml.u.actual:10: Expected `[| (0, 1) |]` but got `[| (0, 2) |]`
-```
-
-To update the expected output, run `UCramRunner` manually, review changes, and update the `.ml.u` file.
-
-### Generate Documentation
-
-```bash
-dune build EXAMPLES.md
-cat _build/default/EXAMPLES.md
-```
-
-The rendered file contains syntax-highlighted OCaml code blocks with output.
-
-### Coexistence with Existing Tests
-
-Both test formats run independently:
-
-```bash
-dune runtest
-```
-
-This now runs:
-- ✅ Existing `lib_test/expect/test_*.ml` expect tests (unchanged)
-- ✅ New `EXAMPLES.md.ml.u` unified script tests (new)
-
----
-
-## Step 5: Continuous Integration
-
-Add to your CI pipeline:
-
-```yaml
-- name: Run Unified Script Tests
-  run: dune runtest
-
-- name: Generate Documentation
-  run: dune build EXAMPLES.md
-```
-
----
-
-## Key Files Reference
-
-| File | Purpose |
-|------|---------|
-| `EXAMPLES.md.ml.u` | Source unified script (runnable test + source) |
-| `EXAMPLES.md` | Rendered documentation (generated) |
-| `./dune` | Build rules (new, additive) |
-| `lib_test/expect/test_*.ml` | Original expect tests (unchanged) |
-
----
-
-## Troubleshooting
-
-### UCramRunner Not Found
-```bash
-opam pin add UnifiedScript_Std https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
-which UCramRunner
-```
-
-### Diff Mismatch After Code Changes
-```bash
-# Review new output
-opam exec -- UCramRunner EXAMPLES.md.ml.u -o EXAMPLES.md.ml.u.tmp --workspace .
-diff EXAMPLES.md.ml.u EXAMPLES.md.ml.u.tmp
-
-# Accept new output
-cp EXAMPLES.md.ml.u.tmp EXAMPLES.md.ml.u
-dune runtest
-```
-
-### Formatting Issues
-Whitespace-sensitive rules:
-- ✅ Commands: `  # code ;;` (2 spaces + hash + space)
-- ✅ Output: `  line` (2 spaces, no prompt)
-- ❌ Wrong: ` # code ;;` (1 space)
-- ❌ Wrong: `  #code;;` (missing space after hash)
-
----
-
-## Further Resources
-
-- **Full Documentation**: https://github.com/diskuv/dk/blob/V2_5/docs/UNIFIED_SCRIPTS.md
-- **Repository**: https://github.com/diskuv/dk
-
----
-
-## Summary
-
-This skill enables you to:
-
-1. ✅ Convert OCaml expect tests into readable, runnable unified scripts
-2. ✅ Run tests and validate output with `dune runtest`
-3. ✅ Render beautiful Markdown documentation with `dune build EXAMPLES.md`
-4. ✅ Maintain alongside existing expect tests (no replacement)
-5. ✅ Automate conversion with provided Python tools
-6. ✅ Integrate into CI/CD for persistent documentation
-
-Unified scripts combine tests and documentation in a single, maintainable source—the best of both worlds for verified examples.
+- **Issues**: https://github.com/diskuv/dk/issues
+- **Source**: https://gitlab.com/dkml/build-tools/MlFront.git
