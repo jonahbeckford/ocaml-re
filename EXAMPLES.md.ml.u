@@ -16,31 +16,46 @@ A small set of formatting helpers used throughout this document. All print to
 
   >>> let or_not_found f fmt v =
   ...   match v () with
-  ...   | exception Not_found -> Format.fprintf fmt "Not_found"
+  ...   | exception Not_found -> Format.fprintf fmt "| *search in* `s` | *not found* |"
   ...   | s -> f fmt s
   ... ;;
   val or_not_found :
     (Format.formatter -> 'a -> unit) ->
     Format.formatter -> (unit -> 'a) -> unit = <fun>
 
-  >>> let array f fmt v =
-  ...   Format.fprintf fmt "[| ";
+  >>> let harray f fmt v =
   ...   Array.iteri (fun i x ->
-  ...     if i > 0 then Format.fprintf fmt "; ";
-  ...     f fmt x) v;
-  ...   Format.fprintf fmt " |]"
-  ... ;;
-  val array :
+  ...     if i > 0 then Format.fprintf fmt "@;";
+  ...     f fmt x) v
+  val harray :
     (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a array -> unit =
     <fun>
 
-  >>> let offset fmt (x, y) = Format.fprintf fmt "(%d, %d)" x y ;;
-  val offset : Format.formatter -> int * int -> unit = <fun>
+  >>> let varray f fmt v =
+  ...   Format.fprintf fmt "@[<v>";
+  ...   Array.iteri (fun i x ->
+  ...     if i > 0 then Format.fprintf fmt "@;";
+  ...     f fmt x) v;
+  ...   Format.fprintf fmt "@]"
+  val varray :
+    (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a array -> unit =
+    <fun>
+
+  >>> let offset s fmt (x, y) =
+  ...   let l = String.length s in
+  ...   if x < 0 || y < 0 || x >= l || y > l then
+  ...     Format.fprintf fmt "| `s[%d:%d]` | *out-of-bounds* |@;" x y
+  ...   else
+  ...     Format.fprintf fmt "| *found* `s[%d:%d]` | `%S` |@;" x y (String.sub s x (y - x))
+  val offset : string -> Format.formatter -> int * int -> unit = <fun>
 
   >>> let test_re ?pos ?len r s =
+  ...   Format.printf "%s" {|\markdown\;|};
+  ...   Format.printf "| | |@.";
+  ...   Format.printf "| --- | --- |@.";
+  ...   Format.printf "| *string under test* `s` | `%S` |@." s;
   ...   let offsets () = Re.Group.all_offset (Re.exec ?pos ?len (Re.compile r) s) in
-  ...   Format.printf "%a@." (or_not_found (array offset)) offsets
-  ... ;;
+  ...   Format.printf "%a@." (or_not_found (varray (offset s))) offsets
   val test_re : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
 
   >>> let pp_group fmt g =
@@ -105,65 +120,110 @@ A small set of formatting helpers used throughout this document. All print to
 Match a literal string.
 
   >>> test_re (Re.str "a") "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.str "a") "b"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b"` |
+  | *search in* `s` | *not found* |
 
 ### `char` / `alt`
 
 Single-character alternation.
 
   >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "b"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b"` |
+  | *found* `s[0:1]` | `"b"` |
 
   >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "c"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"c"` |
+  | *search in* `s` | *not found* |
 
 ### `seq`
 
 Concatenation of two characters.
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ab"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *found* `s[0:2]` | `"ab"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ac"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ac"` |
+  | *search in* `s` | *not found* |
 
 ### `empty` and `epsilon`
 
 `empty` never matches; `epsilon` matches at every position.
 
   >>> test_re Re.empty ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.empty "a"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.epsilon ""
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | `s[0:0]` | *out-of-bounds* |
 
   >>> test_re Re.epsilon "a"
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:0]` | `""` |
 
 ### `rep`
 
 Zero-or-more repetition.
 
   >>> test_re (Re.rep (Re.char 'a')) ""
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | `s[0:0]` | *out-of-bounds* |
 
   >>> test_re (Re.rep (Re.char 'a')) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.rep (Re.char 'a')) "aa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.rep (Re.char 'a')) "b"
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b"` |
+  | *found* `s[0:0]` | `""` |
 
 ---
 
@@ -172,149 +232,284 @@ Zero-or-more repetition.
 ### Beginning of line / end of line
 
   >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ab"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "b\na"
-  [| (2, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b\na"` |
+  | *found* `s[2:3]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ba"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "a\nb"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a\nb"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba\n"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba\n"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ab"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *search in* `s` | *not found* |
 
 ### Word boundaries
 
   >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "bb aa"
-  [| (3, 4) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"bb aa"` |
+  | *found* `s[3:4]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "ba ba"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba ba"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.bow ";"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `";"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.bow ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "bb aa"
-  [| (4, 5) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"bb aa"` |
+  | *found* `s[4:5]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "ab ab"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab ab"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.eow ";"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `";"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re Re.eow ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
 ### Beginning / end of string
 
   >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ab"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "b\na"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b\na"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ba"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "a\nb"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a\nb"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba\n"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba\n"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ab"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *search in* `s` | *not found* |
 
 ### `leol` (last end of line)
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "a\nb"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a\nb"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba\n"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba\n"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ab"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.alt [ Re.str "b\n"; Re.seq [ Re.char 'a'; Re.leol ] ]) "ab\n"
-  [| (1, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab\n"` |
+  | *found* `s[1:3]` | `"b\n"` |
 
 ### `start` / `stop` (relative to `~pos` / `~len`)
 
   >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xab"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"xab"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xb\na"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"xb\na"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xba"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"xba"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "bax"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"bax"` |
+  | *found* `s[1:2]` | `"a"` |
 
   >>> test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "a\nbx"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a\nbx"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "ba\nx"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba\nx"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "abx"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abx"` |
+  | *search in* `s` | *not found* |
 
 ### `word` and `not_boundary`
 
   >>> test_re (Re.word (Re.str "aa")) "aa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.word (Re.str "aa")) "bb aa"
-  [| (3, 5) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"bb aa"` |
+  | *found* `s[3:5]` | `"aa"` |
 
   >>> test_re (Re.word (Re.str "aa")) "aaa"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaa"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.word (Re.str "")) ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.not_boundary; Re.char 'b'; Re.not_boundary ]) "abc"
-  [| (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *found* `s[1:2]` | `"b"` |
 
   >>> test_re (Re.seq [ Re.char ';'; Re.not_boundary; Re.char ';' ]) ";;"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `";;"` |
+  | *found* `s[0:2]` | `";;"` |
 
   >>> test_re (Re.seq [ Re.not_boundary; Re.char ';'; Re.not_boundary ]) ";"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `";"` |
+  | *found* `s[0:1]` | `";"` |
 
   >>> test_re (Re.seq [ Re.not_boundary; Re.char 'a' ]) "abc"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.seq [ Re.char 'c'; Re.not_boundary ]) "abc"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *search in* `s` | *not found* |
 
 ---
 
@@ -323,89 +518,174 @@ Zero-or-more repetition.
 ### Default (first / leftmost-first on whole regex)
 
   >>> test_re (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]) "aabaab"
-  [| (0, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:6]` | `"aabaab"` |
 
   >>> test_re (Re.alt [ Re.str "aa"; Re.str "aaa" ]) "aaaa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.alt [ Re.str "aaa"; Re.str "aa" ]) "aaaa"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:3]` | `"aaa"` |
 
 ### `shortest`
 
   >>> test_re (Re.shortest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:3]` | `"aab"` |
 
   >>> test_re (Re.shortest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
 ### `longest`
 
   >>> test_re (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
-  [| (0, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:6]` | `"aabaab"` |
 
   >>> test_re (Re.longest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:3]` | `"aaa"` |
 
   >>> test_re (Re.longest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:3]` | `"aaa"` |
 
 ### `first`
 
   >>> test_re (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
-  [| (0, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:6]` | `"aabaab"` |
 
   >>> test_re (Re.first (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.first (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaa"` |
+  | *found* `s[0:3]` | `"aaa"` |
 
 ### Combined semantics
 
   >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
   ... test_re (Re.longest r) "aaaaaaa"
-  [| (0, 7); (5, 7) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:7]` | `"aaaaaaa"` |
+  
+  | *found* `s[5:7]` | `"aa"` |
 
   >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
   ... test_re (Re.first r) "aaaaaaa"
-  [| (0, 6); (3, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:6]` | `"aaaaaa"` |
+  
+  | *found* `s[3:6]` | `"aaa"` |
 
   >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
   ... test_re (Re.first (Re.non_greedy r)) "aaaaaaa"
-  [| (0, 0); (-1, -1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:0]` | `""` |
+  
+  | `s[-1:-1]` | *out-of-bounds* |
 
   >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
   ... test_re (Re.shortest r) "aaaaaaa"
-  [| (0, 0); (-1, -1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:0]` | `""` |
+  
+  | `s[-1:-1]` | *out-of-bounds* |
 
   >>> let r' = Re.rep (Re.group (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ]))) in
   ... test_re (Re.longest r') "aaaaaaa"
-  [| (0, 7); (4, 7) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:7]` | `"aaaaaaa"` |
+  
+  | *found* `s[4:7]` | `"aaa"` |
 
   >>> let r' = Re.rep (Re.group (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ]))) in
   ... test_re (Re.first r') "aaaaaaa"
-  [| (0, 6); (4, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaaaaaa"` |
+  | *found* `s[0:6]` | `"aaaaaa"` |
+  
+  | *found* `s[4:6]` | `"aa"` |
 
 ### `greedy` / `non_greedy`
 
   >>> test_re (Re.greedy (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
-  [| (0, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:6]` | `"aabaab"` |
 
   >>> test_re (Re.greedy (Re.rep (Re.group (Re.opt (Re.char 'a'))))) "aa"
-  [| (0, 2); (2, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
+  
+  | `s[2:2]` | *out-of-bounds* |
 
   >>> test_re (Re.non_greedy (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
-  [| (0, 6) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:6]` | `"aabaab"` |
 
   >>> test_re (Re.non_greedy (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aabaab"` |
+  | *found* `s[0:3]` | `"aab"` |
 
   >>> test_re (Re.non_greedy (Re.longest (Re.rep (Re.group (Re.opt (Re.char 'a')))))) "aa"
-  [| (0, 2); (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
+  
+  | *found* `s[1:2]` | `"a"` |
 
 ---
 
@@ -414,68 +694,122 @@ Zero-or-more repetition.
 ### `set`
 
   >>> test_re (Re.rep1 (Re.set "abcd")) "bcbadbabcdba"
-  [| (0, 12) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"bcbadbabcdba"` |
+  | *found* `s[0:12]` | `"bcbadbabcdba"` |
 
   >>> test_re (Re.set "abcd") "e"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"e"` |
+  | *search in* `s` | *not found* |
 
 ### `rg`
 
   >>> test_re (Re.rep1 (Re.rg '0' '9')) "0123456789"
-  [| (0, 10) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"0123456789"` |
+  | *found* `s[0:10]` | `"0123456789"` |
 
   >>> test_re (Re.rep1 (Re.rg '0' '9')) "a"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *search in* `s` | *not found* |
 
 ### `inter`
 
   >>> test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "456"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"456"` |
+  | *found* `s[0:3]` | `"456"` |
 
   >>> test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "7"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"7"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.inter [ Re.alt [ Re.char 'a'; Re.char 'b' ]; Re.char 'b' ]) "b"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b"` |
+  | *found* `s[0:1]` | `"b"` |
 
 ### `diff`
 
   >>> test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "0123789"
-  [| (0, 7) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"0123789"` |
+  | *found* `s[0:7]` | `"0123789"` |
 
   >>> test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "4"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"4"` |
+  | *search in* `s` | *not found* |
 
 ### `compl`
 
   >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "A:Z+"
-  [| (0, 4) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"A:Z+"` |
+  | *found* `s[0:4]` | `"A:Z+"` |
 
   >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "0"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"0"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "a"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *search in* `s` | *not found* |
 
 ### Case sensitivity
 
   >>> test_re (Re.case (Re.str "abc")) "abc"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *found* `s[0:3]` | `"abc"` |
 
   >>> test_re (Re.no_case (Re.case (Re.str "abc"))) "abc"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *found* `s[0:3]` | `"abc"` |
 
   >>> test_re (Re.case (Re.str "abc")) "ABC"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ABC"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.no_case (Re.case (Re.str "abc"))) "ABC"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ABC"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.no_case (Re.str "abc")) "abc"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"abc"` |
+  | *found* `s[0:3]` | `"abc"` |
 
   >>> test_re (Re.no_case (Re.str "abc")) "ABC"
-  [| (0, 3) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ABC"` |
+  | *found* `s[0:3]` | `"ABC"` |
 
 ---
 
@@ -547,8 +881,14 @@ Zero-or-more repetition.
   ...                  Re.opt (Re.group (Re.char 'a'));
   ...                  Re.group (Re.char 'b') ] in
   ... let m = Re.exec (Re.compile r) "ab" in
-  ... Format.printf "%a@." (array offset) (Re.Group.all_offset m)
-  [| (0, 2); (0, 1); (-1, -1); (1, 2) |]
+  ... Format.printf "%s" {|\markdown\;|};
+  ... Format.printf "| Group | |@.";
+  ... Format.printf "| --- | --- |@.";
+  ... Format.printf "%a@." (harray (offset "ab")) (Re.Group.all_offset m)
+  \markdown\;| Group | |
+  | --- | --- |
+  | *found* `s[0:2]` | `"ab"` |  | *found* `s[0:1]` | `"a"` | 
+  | `s[-1:-1]` | *out-of-bounds* |  | *found* `s[1:2]` | `"b"` |
 
 ### `no_group`
 
@@ -556,17 +896,30 @@ Zero-or-more repetition.
   ...                  Re.opt (Re.group (Re.char 'a'));
   ...                  Re.group (Re.char 'b') ] in
   ... test_re (Re.no_group r) "ab"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *found* `s[0:2]` | `"ab"` |
 
 ### `nest`
 
   >>> let r = Re.rep (Re.nest (Re.alt [ Re.group (Re.char 'a'); Re.char 'b' ])) in
   ... test_re r "ab"
-  [| (0, 2); (-1, -1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ab"` |
+  | *found* `s[0:2]` | `"ab"` |
+  
+  | `s[-1:-1]` | *out-of-bounds* |
 
   >>> let r = Re.rep (Re.nest (Re.alt [ Re.group (Re.char 'a'); Re.char 'b' ])) in
   ... test_re r "ba"
-  [| (0, 2); (1, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"ba"` |
+  | *found* `s[0:2]` | `"ba"` |
+  
+  | *found* `s[1:2]` | `"a"` |
 
 ---
 
@@ -593,28 +946,52 @@ Zero-or-more repetition.
 ### `repn`
 
   >>> test_re (Re.repn (Re.char 'a') 0 None) ""
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | `s[0:0]` | *out-of-bounds* |
 
   >>> test_re (Re.repn (Re.char 'a') 2 None) "a"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.repn (Re.char 'a') 2 None) "aa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.repn (Re.char 'a') 0 (Some 0)) ""
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | `s[0:0]` | *out-of-bounds* |
 
   >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aaa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aaa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
 ### Invalid `repn` arguments
 
@@ -630,24 +1007,42 @@ Zero-or-more repetition.
 ### `rep1`
 
   >>> test_re (Re.rep1 (Re.char 'a')) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
   >>> test_re (Re.rep1 (Re.char 'a')) "aa"
-  [| (0, 2) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"aa"` |
+  | *found* `s[0:2]` | `"aa"` |
 
   >>> test_re (Re.rep1 (Re.char 'a')) ""
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | *search in* `s` | *not found* |
 
   >>> test_re (Re.rep1 (Re.char 'a')) "b"
-  Not_found
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"b"` |
+  | *search in* `s` | *not found* |
 
 ### `opt`
 
   >>> test_re (Re.opt (Re.char 'a')) ""
-  [| (0, 0) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `""` |
+  | `s[0:0]` | *out-of-bounds* |
 
   >>> test_re (Re.opt (Re.char 'a')) "a"
-  [| (0, 1) |]
+  \markdown\;| | |
+  | --- | --- |
+  | *string under test* `s` | `"a"` |
+  | *found* `s[0:1]` | `"a"` |
 
 ---
 

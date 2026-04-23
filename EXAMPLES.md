@@ -102,7 +102,7 @@ A small set of formatting helpers used throughout this document. All print to
 ```ocaml
 (* >>> *) let or_not_found f fmt v =
   match v () with
-  | exception Not_found -> Format.fprintf fmt "Not_found"
+  | exception Not_found -> Format.fprintf fmt "| *search in* `s` | *not found* |"
   | s -> f fmt s
 ;;
 ```
@@ -117,18 +117,15 @@ val or_not_found :
 
 
 ```ocaml
-(* >>> *) let array f fmt v =
-  Format.fprintf fmt "[| ";
+(* >>> *) let harray f fmt v =
   Array.iteri (fun i x ->
-    if i > 0 then Format.fprintf fmt "; ";
-    f fmt x) v;
-  Format.fprintf fmt " |]"
-;;
+    if i > 0 then Format.fprintf fmt "@;";
+    f fmt x) v
 ```
 
 
 ```text
-val array :
+val harray :
   (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a array -> unit =
   <fun>
 ```
@@ -136,21 +133,47 @@ val array :
 
 
 ```ocaml
-(* >>> *) let offset fmt (x, y) = Format.fprintf fmt "(%d, %d)" x y ;;
+(* >>> *) let varray f fmt v =
+  Format.fprintf fmt "@[<v>";
+  Array.iteri (fun i x ->
+    if i > 0 then Format.fprintf fmt "@;";
+    f fmt x) v;
+  Format.fprintf fmt "@]"
 ```
 
 
 ```text
-val offset : Format.formatter -> int * int -> unit = <fun>
+val varray :
+  (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a array -> unit =
+  <fun>
+```
+
+
+
+```ocaml
+(* >>> *) let offset s fmt (x, y) =
+  let l = String.length s in
+  if x < 0 || y < 0 || x >= l || y > l then
+    Format.fprintf fmt "| `s[%d:%d]` | *out-of-bounds* |@;" x y
+  else
+    Format.fprintf fmt "| *found* `s[%d:%d]` | `%S` |@;" x y (String.sub s x (y - x))
+```
+
+
+```text
+val offset : string -> Format.formatter -> int * int -> unit = <fun>
 ```
 
 
 
 ```ocaml
 (* >>> *) let test_re ?pos ?len r s =
+  Format.printf "%s" {|\markdown\;|};
+  Format.printf "| | |@.";
+  Format.printf "| --- | --- |@.";
+  Format.printf "| *string under test* `s` | `%S` |@." s;
   let offsets () = Re.Group.all_offset (Re.exec ?pos ?len (Re.compile r) s) in
-  Format.printf "%a@." (or_not_found (array offset)) offsets
-;;
+  Format.printf "%a@." (or_not_found (varray (offset s))) offsets
 ```
 
 
@@ -297,22 +320,20 @@ Match a literal string.
 (* >>> *) test_re (Re.str "a") "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.str "a") "b"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b"` |
+| *search in* `s` | *not found* |
 
 ### `char` / `alt`
 
@@ -323,33 +344,30 @@ Single-character alternation.
 (* >>> *) test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "b"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b"` |
+| *found* `s[0:1]` | `"b"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "c"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"c"` |
+| *search in* `s` | *not found* |
 
 ### `seq`
 
@@ -360,22 +378,20 @@ Concatenation of two characters.
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ab"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *found* `s[0:2]` | `"ab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ac"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ac"` |
+| *search in* `s` | *not found* |
 
 ### `empty` and `epsilon`
 
@@ -386,44 +402,40 @@ Not_found
 (* >>> *) test_re Re.empty ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.empty "a"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.epsilon ""
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| `s[0:0]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re Re.epsilon "a"
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:0]` | `""` |
 
 ### `rep`
 
@@ -434,44 +446,40 @@ Zero-or-more repetition.
 (* >>> *) test_re (Re.rep (Re.char 'a')) ""
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| `s[0:0]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep (Re.char 'a')) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep (Re.char 'a')) "aa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep (Re.char 'a')) "b"
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b"` |
+| *found* `s[0:0]` | `""` |
 
 ---
 
@@ -484,77 +492,70 @@ Zero-or-more repetition.
 (* >>> *) test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ab"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bol; Re.char 'a' ]) "b\na"
 ```
 
-
-```text
-[| (2, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b\na"` |
+| *found* `s[2:3]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ba"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eol ]) "a\nb"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a\nb"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba\n"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba\n"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ab"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *search in* `s` | *not found* |
 
 ### Word boundaries
 
@@ -563,110 +564,100 @@ Not_found
 (* >>> *) test_re (Re.seq [ Re.bow; Re.char 'a' ]) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bow; Re.char 'a' ]) "bb aa"
 ```
 
-
-```text
-[| (3, 4) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"bb aa"` |
+| *found* `s[3:4]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bow; Re.char 'a' ]) "ba ba"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba ba"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.bow ";"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `";"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.bow ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eow ]) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eow ]) "bb aa"
 ```
 
-
-```text
-[| (4, 5) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"bb aa"` |
+| *found* `s[4:5]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eow ]) "ab ab"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab ab"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.eow ";"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `";"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re Re.eow ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 ### Beginning / end of string
 
@@ -675,77 +666,70 @@ Not_found
 (* >>> *) test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ab"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bos; Re.char 'a' ]) "b\na"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b\na"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ba"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eos ]) "a\nb"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a\nb"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba\n"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba\n"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ab"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *search in* `s` | *not found* |
 
 ### `leol` (last end of line)
 
@@ -754,55 +738,50 @@ Not_found
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.leol ]) "a\nb"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a\nb"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba\n"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba\n"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ab"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.alt [ Re.str "b\n"; Re.seq [ Re.char 'a'; Re.leol ] ]) "ab\n"
 ```
 
-
-```text
-[| (1, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab\n"` |
+| *found* `s[1:3]` | `"b\n"` |
 
 ### `start` / `stop` (relative to `~pos` / `~len`)
 
@@ -811,77 +790,70 @@ Not_found
 (* >>> *) test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xab"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"xab"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xb\na"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"xb\na"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xba"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"xba"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "bax"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"bax"` |
+| *found* `s[1:2]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "a\nbx"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a\nbx"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "ba\nx"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba\nx"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "abx"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abx"` |
+| *search in* `s` | *not found* |
 
 ### `word` and `not_boundary`
 
@@ -890,99 +862,90 @@ Not_found
 (* >>> *) test_re (Re.word (Re.str "aa")) "aa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.word (Re.str "aa")) "bb aa"
 ```
 
-
-```text
-[| (3, 5) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"bb aa"` |
+| *found* `s[3:5]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.word (Re.str "aa")) "aaa"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaa"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.word (Re.str "")) ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.not_boundary; Re.char 'b'; Re.not_boundary ]) "abc"
 ```
 
-
-```text
-[| (1, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *found* `s[1:2]` | `"b"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char ';'; Re.not_boundary; Re.char ';' ]) ";;"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `";;"` |
+| *found* `s[0:2]` | `";;"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.not_boundary; Re.char ';'; Re.not_boundary ]) ";"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `";"` |
+| *found* `s[0:1]` | `";"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.not_boundary; Re.char 'a' ]) "abc"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.seq [ Re.char 'c'; Re.not_boundary ]) "abc"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *search in* `s` | *not found* |
 
 ---
 
@@ -995,33 +958,30 @@ Not_found
 (* >>> *) test_re (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]) "aabaab"
 ```
 
-
-```text
-[| (0, 6) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:6]` | `"aabaab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.alt [ Re.str "aa"; Re.str "aaa" ]) "aaaa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.alt [ Re.str "aaa"; Re.str "aa" ]) "aaaa"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:3]` | `"aaa"` |
 
 ### `shortest`
 
@@ -1030,33 +990,30 @@ Not_found
 (* >>> *) test_re (Re.shortest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:3]` | `"aab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.shortest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 ### `longest`
 
@@ -1065,33 +1022,30 @@ Not_found
 (* >>> *) test_re (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
 ```
 
-
-```text
-[| (0, 6) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:6]` | `"aabaab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.longest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:3]` | `"aaa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.longest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:3]` | `"aaa"` |
 
 ### `first`
 
@@ -1100,33 +1054,30 @@ Not_found
 (* >>> *) test_re (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
 ```
 
-
-```text
-[| (0, 6) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:6]` | `"aabaab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.first (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.first (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaa"` |
+| *found* `s[0:3]` | `"aaa"` |
 
 ### Combined semantics
 
@@ -1136,11 +1087,12 @@ Not_found
 test_re (Re.longest r) "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:7]` | `"aaaaaaa"` |
 
-```text
-[| (0, 7); (5, 7) |]
-```
-
+| *found* `s[5:7]` | `"aa"` |
 
 
 ```ocaml
@@ -1148,11 +1100,12 @@ test_re (Re.longest r) "aaaaaaa"
 test_re (Re.first r) "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:6]` | `"aaaaaa"` |
 
-```text
-[| (0, 6); (3, 6) |]
-```
-
+| *found* `s[3:6]` | `"aaa"` |
 
 
 ```ocaml
@@ -1160,11 +1113,12 @@ test_re (Re.first r) "aaaaaaa"
 test_re (Re.first (Re.non_greedy r)) "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:0]` | `""` |
 
-```text
-[| (0, 0); (-1, -1) |]
-```
-
+| `s[-1:-1]` | *out-of-bounds* |
 
 
 ```ocaml
@@ -1172,11 +1126,12 @@ test_re (Re.first (Re.non_greedy r)) "aaaaaaa"
 test_re (Re.shortest r) "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:0]` | `""` |
 
-```text
-[| (0, 0); (-1, -1) |]
-```
-
+| `s[-1:-1]` | *out-of-bounds* |
 
 
 ```ocaml
@@ -1184,11 +1139,12 @@ test_re (Re.shortest r) "aaaaaaa"
 test_re (Re.longest r') "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:7]` | `"aaaaaaa"` |
 
-```text
-[| (0, 7); (4, 7) |]
-```
-
+| *found* `s[4:7]` | `"aaa"` |
 
 
 ```ocaml
@@ -1196,11 +1152,12 @@ test_re (Re.longest r') "aaaaaaa"
 test_re (Re.first r') "aaaaaaa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaaaaaa"` |
+| *found* `s[0:6]` | `"aaaaaa"` |
 
-```text
-[| (0, 6); (4, 6) |]
-```
-
+| *found* `s[4:6]` | `"aa"` |
 
 ### `greedy` / `non_greedy`
 
@@ -1209,55 +1166,54 @@ test_re (Re.first r') "aaaaaaa"
 (* >>> *) test_re (Re.greedy (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
 ```
 
-
-```text
-[| (0, 6) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:6]` | `"aabaab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.greedy (Re.rep (Re.group (Re.opt (Re.char 'a'))))) "aa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
-```text
-[| (0, 2); (2, 2) |]
-```
-
+| `s[2:2]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.non_greedy (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
 ```
 
-
-```text
-[| (0, 6) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:6]` | `"aabaab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.non_greedy (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aabaab"` |
+| *found* `s[0:3]` | `"aab"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.non_greedy (Re.longest (Re.rep (Re.group (Re.opt (Re.char 'a')))))) "aa"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
-```text
-[| (0, 2); (1, 2) |]
-```
-
+| *found* `s[1:2]` | `"a"` |
 
 ---
 
@@ -1270,22 +1226,20 @@ test_re (Re.first r') "aaaaaaa"
 (* >>> *) test_re (Re.rep1 (Re.set "abcd")) "bcbadbabcdba"
 ```
 
-
-```text
-[| (0, 12) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"bcbadbabcdba"` |
+| *found* `s[0:12]` | `"bcbadbabcdba"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.set "abcd") "e"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"e"` |
+| *search in* `s` | *not found* |
 
 ### `rg`
 
@@ -1294,22 +1248,20 @@ Not_found
 (* >>> *) test_re (Re.rep1 (Re.rg '0' '9')) "0123456789"
 ```
 
-
-```text
-[| (0, 10) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"0123456789"` |
+| *found* `s[0:10]` | `"0123456789"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.rg '0' '9')) "a"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *search in* `s` | *not found* |
 
 ### `inter`
 
@@ -1318,33 +1270,30 @@ Not_found
 (* >>> *) test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "456"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"456"` |
+| *found* `s[0:3]` | `"456"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "7"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"7"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.inter [ Re.alt [ Re.char 'a'; Re.char 'b' ]; Re.char 'b' ]) "b"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b"` |
+| *found* `s[0:1]` | `"b"` |
 
 ### `diff`
 
@@ -1353,22 +1302,20 @@ Not_found
 (* >>> *) test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "0123789"
 ```
 
-
-```text
-[| (0, 7) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"0123789"` |
+| *found* `s[0:7]` | `"0123789"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "4"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"4"` |
+| *search in* `s` | *not found* |
 
 ### `compl`
 
@@ -1377,33 +1324,30 @@ Not_found
 (* >>> *) test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "A:Z+"
 ```
 
-
-```text
-[| (0, 4) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"A:Z+"` |
+| *found* `s[0:4]` | `"A:Z+"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "0"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"0"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "a"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *search in* `s` | *not found* |
 
 ### Case sensitivity
 
@@ -1412,66 +1356,60 @@ Not_found
 (* >>> *) test_re (Re.case (Re.str "abc")) "abc"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *found* `s[0:3]` | `"abc"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.no_case (Re.case (Re.str "abc"))) "abc"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *found* `s[0:3]` | `"abc"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.case (Re.str "abc")) "ABC"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ABC"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.no_case (Re.case (Re.str "abc"))) "ABC"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ABC"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.no_case (Re.str "abc")) "abc"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"abc"` |
+| *found* `s[0:3]` | `"abc"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.no_case (Re.str "abc")) "ABC"
 ```
 
-
-```text
-[| (0, 3) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ABC"` |
+| *found* `s[0:3]` | `"ABC"` |
 
 ---
 
@@ -1661,14 +1599,16 @@ TEST
                  Re.opt (Re.group (Re.char 'a'));
                  Re.group (Re.char 'b') ] in
 let m = Re.exec (Re.compile r) "ab" in
-Format.printf "%a@." (array offset) (Re.Group.all_offset m)
+Format.printf "%s" {|\markdown\;|};
+Format.printf "| Group | |@.";
+Format.printf "| --- | --- |@.";
+Format.printf "%a@." (harray (offset "ab")) (Re.Group.all_offset m)
 ```
 
-
-```text
-[| (0, 2); (0, 1); (-1, -1); (1, 2) |]
-```
-
+| Group | |
+| --- | --- |
+| *found* `s[0:2]` | `"ab"` |  | *found* `s[0:1]` | `"a"` | 
+| `s[-1:-1]` | *out-of-bounds* |  | *found* `s[1:2]` | `"b"` |
 
 ### `no_group`
 
@@ -1680,11 +1620,10 @@ Format.printf "%a@." (array offset) (Re.Group.all_offset m)
 test_re (Re.no_group r) "ab"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *found* `s[0:2]` | `"ab"` |
 
 ### `nest`
 
@@ -1694,11 +1633,12 @@ test_re (Re.no_group r) "ab"
 test_re r "ab"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"ab"` |
+| *found* `s[0:2]` | `"ab"` |
 
-```text
-[| (0, 2); (-1, -1) |]
-```
-
+| `s[-1:-1]` | *out-of-bounds* |
 
 
 ```ocaml
@@ -1706,11 +1646,12 @@ test_re r "ab"
 test_re r "ba"
 ```
 
+| | |
+| --- | --- |
+| *string under test* `s` | `"ba"` |
+| *found* `s[0:2]` | `"ba"` |
 
-```text
-[| (0, 2); (1, 2) |]
-```
-
+| *found* `s[1:2]` | `"a"` |
 
 ---
 
@@ -1773,88 +1714,80 @@ true
 (* >>> *) test_re (Re.repn (Re.char 'a') 0 None) ""
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| `s[0:0]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 2 None) "a"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 2 None) "aa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 0 (Some 0)) ""
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| `s[0:0]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 1 (Some 2)) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 1 (Some 2)) ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aaa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aaa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 ### Invalid `repn` arguments
 
@@ -1898,44 +1831,40 @@ Invalid_argument "Re.repn"
 (* >>> *) test_re (Re.rep1 (Re.char 'a')) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.char 'a')) "aa"
 ```
 
-
-```text
-[| (0, 2) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"aa"` |
+| *found* `s[0:2]` | `"aa"` |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.char 'a')) ""
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| *search in* `s` | *not found* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.rep1 (Re.char 'a')) "b"
 ```
 
-
-```text
-Not_found
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"b"` |
+| *search in* `s` | *not found* |
 
 ### `opt`
 
@@ -1944,22 +1873,20 @@ Not_found
 (* >>> *) test_re (Re.opt (Re.char 'a')) ""
 ```
 
-
-```text
-[| (0, 0) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `""` |
+| `s[0:0]` | *out-of-bounds* |
 
 
 ```ocaml
 (* >>> *) test_re (Re.opt (Re.char 'a')) "a"
 ```
 
-
-```text
-[| (0, 1) |]
-```
-
+| | |
+| --- | --- |
+| *string under test* `s` | `"a"` |
+| *found* `s[0:1]` | `"a"` |
 
 ---
 

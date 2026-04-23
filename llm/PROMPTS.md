@@ -56,3 +56,5 @@
 11. Wrote `analyze-project.{ps1,sh}` to put `**/dune`, `dune-project` and `**/*.ml` into context. Edited SKILL.md to use them.
 
 12. Reran with "Claude Sonnet 4.6 High" with empty session with prompt from Step 7 ("... create EXAMPLES.md ...")
+
+13. Rewrote helpers to print Markdown metadata and Markdown tables (etc)
