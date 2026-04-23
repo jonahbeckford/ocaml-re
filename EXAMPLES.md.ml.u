@@ -1,0 +1,1647 @@
+# ocaml-re: Examples
+
+This literate test document demonstrates the public API of the
+[`re`](https://github.com/ocaml/ocaml-re) library — pure OCaml regular
+expressions supporting Perl, PCRE, POSIX, Emacs and Glob dialects.
+
+Each executable snippet is run by `UCramRunner` and its output diffed against
+the expected block that follows it. The snippets here mirror the `let%expect_test`
+suites in `lib_test/expect/`, restricted to those that use only the public
+`Re` API.
+
+## Helpers
+
+A small set of formatting helpers used throughout this document. All print to
+`Format.std_formatter` so their output is captured by `UCramRunner`.
+
+  >>> let or_not_found f fmt v =
+  ...   match v () with
+  ...   | exception Not_found -> Format.fprintf fmt "Not_found"
+  ...   | s -> f fmt s
+  ... ;;
+  val or_not_found :
+    (Format.formatter -> 'a -> unit) ->
+    Format.formatter -> (unit -> 'a) -> unit = <fun>
+
+  >>> let array f fmt v =
+  ...   Format.fprintf fmt "[| ";
+  ...   Array.iteri (fun i x ->
+  ...     if i > 0 then Format.fprintf fmt "; ";
+  ...     f fmt x) v;
+  ...   Format.fprintf fmt " |]"
+  ... ;;
+  val array :
+    (Format.formatter -> 'a -> unit) -> Format.formatter -> 'a array -> unit =
+    <fun>
+
+  >>> let offset fmt (x, y) = Format.fprintf fmt "(%d, %d)" x y ;;
+  val offset : Format.formatter -> int * int -> unit = <fun>
+
+  >>> let test_re ?pos ?len r s =
+  ...   let offsets () = Re.Group.all_offset (Re.exec ?pos ?len (Re.compile r) s) in
+  ...   Format.printf "%a@." (or_not_found (array offset)) offsets
+  ... ;;
+  val test_re : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
+
+  >>> let pp_group fmt g =
+  ...   let n = Re.Group.nb_groups g in
+  ...   Format.fprintf fmt "(Group";
+  ...   for i = 0 to n - 1 do
+  ...     match Re.Group.get_opt g i with
+  ...     | None -> Format.fprintf fmt "( (-1 -1))"
+  ...     | Some s ->
+  ...       let a, b = Re.Group.offset g i in
+  ...       Format.fprintf fmt "(%s (%d %d))" s a b
+  ...   done;
+  ...   Format.fprintf fmt ")"
+  ... ;;
+  val pp_group : Format.formatter -> Re.Group.t -> unit = <fun>
+
+  >>> let t re s =
+  ...   match Re.exec_opt (Re.compile re) s with
+  ...   | None -> Format.printf "<None>@."
+  ...   | Some g -> Format.printf "%a@." pp_group g
+  ... ;;
+  val t : Re.t -> string -> unit = <fun>
+
+  >>> let strings lst =
+  ...   Format.printf "[";
+  ...   List.iteri (fun i s ->
+  ...     if i > 0 then Format.printf "; ";
+  ...     Format.printf "%S" s) lst;
+  ...   Format.printf "]@."
+  ... ;;
+  val strings : string list -> unit = <fun>
+
+  >>> let invalid_argument f =
+  ...   match f () with
+  ...   | s -> ignore s
+  ...   | exception Invalid_argument s ->
+  ...     Format.printf "Invalid_argument %S@." s
+  ... ;;
+  val invalid_argument : (unit -> 'a) -> unit = <fun>
+
+  >>> let re_empty = Re.Posix.compile_pat "" ;;
+  val re_empty : Re__.Core.re = <abstr>
+
+  >>> let re_whitespace = Re.Pcre.regexp "[\t ]+" ;;
+  val re_whitespace : Re.Pcre.regexp = <abstr>
+
+  >>> let re_eol = Re.compile Re.eol ;;
+  val re_eol : Re.re = <abstr>
+
+  >>> let re_bow = Re.compile Re.bow ;;
+  val re_bow : Re.re = <abstr>
+
+  >>> let re_eow = Re.compile Re.eow ;;
+  val re_eow : Re.re = <abstr>
+
+---
+
+## Basic regex constructors (from `test_re.ml`)
+
+### `str`
+
+Match a literal string.
+
+  >>> test_re (Re.str "a") "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.str "a") "b"
+  Not_found
+
+### `char` / `alt`
+
+Single-character alternation.
+
+  >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "b"
+  [| (0, 1) |]
+
+  >>> test_re (Re.alt [ Re.char 'a'; Re.char 'b' ]) "c"
+  Not_found
+
+### `seq`
+
+Concatenation of two characters.
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ab"
+  [| (0, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.char 'b' ]) "ac"
+  Not_found
+
+### `empty` and `epsilon`
+
+`empty` never matches; `epsilon` matches at every position.
+
+  >>> test_re Re.empty ""
+  Not_found
+
+  >>> test_re Re.empty "a"
+  Not_found
+
+  >>> test_re Re.epsilon ""
+  [| (0, 0) |]
+
+  >>> test_re Re.epsilon "a"
+  [| (0, 0) |]
+
+### `rep`
+
+Zero-or-more repetition.
+
+  >>> test_re (Re.rep (Re.char 'a')) ""
+  [| (0, 0) |]
+
+  >>> test_re (Re.rep (Re.char 'a')) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.rep (Re.char 'a')) "aa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.rep (Re.char 'a')) "b"
+  [| (0, 0) |]
+
+---
+
+## Anchors (from `test_re.ml`)
+
+### Beginning of line / end of line
+
+  >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ab"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "b\na"
+  [| (2, 3) |]
+
+  >>> test_re (Re.seq [ Re.bol; Re.char 'a' ]) "ba"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "a\nb"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ba\n"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eol ]) "ab"
+  Not_found
+
+### Word boundaries
+
+  >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "bb aa"
+  [| (3, 4) |]
+
+  >>> test_re (Re.seq [ Re.bow; Re.char 'a' ]) "ba ba"
+  Not_found
+
+  >>> test_re Re.bow ";"
+  Not_found
+
+  >>> test_re Re.bow ""
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "bb aa"
+  [| (4, 5) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eow ]) "ab ab"
+  Not_found
+
+  >>> test_re Re.eow ";"
+  Not_found
+
+  >>> test_re Re.eow ""
+  Not_found
+
+### Beginning / end of string
+
+  >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ab"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "b\na"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.bos; Re.char 'a' ]) "ba"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "a\nb"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ba\n"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.eos ]) "ab"
+  Not_found
+
+### `leol` (last end of line)
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "a\nb"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ba\n"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char 'a'; Re.leol ]) "ab"
+  Not_found
+
+  >>> test_re (Re.alt [ Re.str "b\n"; Re.seq [ Re.char 'a'; Re.leol ] ]) "ab\n"
+  [| (1, 3) |]
+
+### `start` / `stop` (relative to `~pos` / `~len`)
+
+  >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xab"
+  [| (1, 2) |]
+
+  >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xb\na"
+  Not_found
+
+  >>> test_re ~pos:1 (Re.seq [ Re.start; Re.char 'a' ]) "xba"
+  Not_found
+
+  >>> test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "bax"
+  [| (1, 2) |]
+
+  >>> test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "a\nbx"
+  Not_found
+
+  >>> test_re ~len:3 (Re.seq [ Re.char 'a'; Re.stop ]) "ba\nx"
+  Not_found
+
+  >>> test_re ~len:2 (Re.seq [ Re.char 'a'; Re.stop ]) "abx"
+  Not_found
+
+### `word` and `not_boundary`
+
+  >>> test_re (Re.word (Re.str "aa")) "aa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.word (Re.str "aa")) "bb aa"
+  [| (3, 5) |]
+
+  >>> test_re (Re.word (Re.str "aa")) "aaa"
+  Not_found
+
+  >>> test_re (Re.word (Re.str "")) ""
+  Not_found
+
+  >>> test_re (Re.seq [ Re.not_boundary; Re.char 'b'; Re.not_boundary ]) "abc"
+  [| (1, 2) |]
+
+  >>> test_re (Re.seq [ Re.char ';'; Re.not_boundary; Re.char ';' ]) ";;"
+  [| (0, 2) |]
+
+  >>> test_re (Re.seq [ Re.not_boundary; Re.char ';'; Re.not_boundary ]) ";"
+  [| (0, 1) |]
+
+  >>> test_re (Re.seq [ Re.not_boundary; Re.char 'a' ]) "abc"
+  Not_found
+
+  >>> test_re (Re.seq [ Re.char 'c'; Re.not_boundary ]) "abc"
+  Not_found
+
+---
+
+## Match semantics (from `test_re.ml`)
+
+### Default (first / leftmost-first on whole regex)
+
+  >>> test_re (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]) "aabaab"
+  [| (0, 6) |]
+
+  >>> test_re (Re.alt [ Re.str "aa"; Re.str "aaa" ]) "aaaa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.alt [ Re.str "aaa"; Re.str "aa" ]) "aaaa"
+  [| (0, 3) |]
+
+### `shortest`
+
+  >>> test_re (Re.shortest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
+  [| (0, 3) |]
+
+  >>> test_re (Re.shortest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
+  [| (0, 2) |]
+
+### `longest`
+
+  >>> test_re (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
+  [| (0, 6) |]
+
+  >>> test_re (Re.longest (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
+  [| (0, 3) |]
+
+  >>> test_re (Re.longest (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
+  [| (0, 3) |]
+
+### `first`
+
+  >>> test_re (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
+  [| (0, 6) |]
+
+  >>> test_re (Re.first (Re.alt [ Re.str "aa"; Re.str "aaa" ])) "aaaa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.first (Re.alt [ Re.str "aaa"; Re.str "aa" ])) "aaaa"
+  [| (0, 3) |]
+
+### Combined semantics
+
+  >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
+  ... test_re (Re.longest r) "aaaaaaa"
+  [| (0, 7); (5, 7) |]
+
+  >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
+  ... test_re (Re.first r) "aaaaaaa"
+  [| (0, 6); (3, 6) |]
+
+  >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
+  ... test_re (Re.first (Re.non_greedy r)) "aaaaaaa"
+  [| (0, 0); (-1, -1) |]
+
+  >>> let r = Re.rep (Re.group (Re.alt [ Re.str "aaa"; Re.str "aa" ])) in
+  ... test_re (Re.shortest r) "aaaaaaa"
+  [| (0, 0); (-1, -1) |]
+
+  >>> let r' = Re.rep (Re.group (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ]))) in
+  ... test_re (Re.longest r') "aaaaaaa"
+  [| (0, 7); (4, 7) |]
+
+  >>> let r' = Re.rep (Re.group (Re.shortest (Re.alt [ Re.str "aaa"; Re.str "aa" ]))) in
+  ... test_re (Re.first r') "aaaaaaa"
+  [| (0, 6); (4, 6) |]
+
+### `greedy` / `non_greedy`
+
+  >>> test_re (Re.greedy (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ])) "aabaab"
+  [| (0, 6) |]
+
+  >>> test_re (Re.greedy (Re.rep (Re.group (Re.opt (Re.char 'a'))))) "aa"
+  [| (0, 2); (2, 2) |]
+
+  >>> test_re (Re.non_greedy (Re.longest (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
+  [| (0, 6) |]
+
+  >>> test_re (Re.non_greedy (Re.first (Re.seq [ Re.rep (Re.alt [ Re.char 'a'; Re.char 'b' ]); Re.char 'b' ]))) "aabaab"
+  [| (0, 3) |]
+
+  >>> test_re (Re.non_greedy (Re.longest (Re.rep (Re.group (Re.opt (Re.char 'a')))))) "aa"
+  [| (0, 2); (1, 2) |]
+
+---
+
+## Character sets (from `test_re.ml`)
+
+### `set`
+
+  >>> test_re (Re.rep1 (Re.set "abcd")) "bcbadbabcdba"
+  [| (0, 12) |]
+
+  >>> test_re (Re.set "abcd") "e"
+  Not_found
+
+### `rg`
+
+  >>> test_re (Re.rep1 (Re.rg '0' '9')) "0123456789"
+  [| (0, 10) |]
+
+  >>> test_re (Re.rep1 (Re.rg '0' '9')) "a"
+  Not_found
+
+### `inter`
+
+  >>> test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "456"
+  [| (0, 3) |]
+
+  >>> test_re (Re.rep1 (Re.inter [ Re.rg '0' '9'; Re.rg '4' '6' ])) "7"
+  Not_found
+
+  >>> test_re (Re.inter [ Re.alt [ Re.char 'a'; Re.char 'b' ]; Re.char 'b' ]) "b"
+  [| (0, 1) |]
+
+### `diff`
+
+  >>> test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "0123789"
+  [| (0, 7) |]
+
+  >>> test_re (Re.rep1 (Re.diff (Re.rg '0' '9') (Re.rg '4' '6'))) "4"
+  Not_found
+
+### `compl`
+
+  >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "A:Z+"
+  [| (0, 4) |]
+
+  >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "0"
+  Not_found
+
+  >>> test_re (Re.rep1 (Re.compl [ Re.rg '0' '9'; Re.rg 'a' 'z' ])) "a"
+  Not_found
+
+### Case sensitivity
+
+  >>> test_re (Re.case (Re.str "abc")) "abc"
+  [| (0, 3) |]
+
+  >>> test_re (Re.no_case (Re.case (Re.str "abc"))) "abc"
+  [| (0, 3) |]
+
+  >>> test_re (Re.case (Re.str "abc")) "ABC"
+  Not_found
+
+  >>> test_re (Re.no_case (Re.case (Re.str "abc"))) "ABC"
+  Not_found
+
+  >>> test_re (Re.no_case (Re.str "abc")) "abc"
+  [| (0, 3) |]
+
+  >>> test_re (Re.no_case (Re.str "abc")) "ABC"
+  [| (0, 3) |]
+
+---
+
+## `witness` (from `test_re.ml`)
+
+`witness` produces a string that matches the given regex.
+
+  >>> Format.printf "%s@." (Re.witness (Re.set "ac"))
+  a
+
+  >>> Format.printf "%s@." (Re.witness (Re.repn (Re.str "foo") 3 None))
+  foofoofoo
+
+  >>> Format.printf "%s@." (Re.witness (Re.alt [ Re.char 'c'; Re.char 'd' ]))
+  c
+
+  >>> Format.printf "%s@." (Re.witness (Re.no_case (Re.str "test")))
+  TEST
+
+  >>> Format.printf "%s@." (Re.witness Re.eol)
+
+---
+
+## Groups (from `test_group.ml`)
+
+### Empty group
+
+  >>> let empty = Re.group Re.empty in t empty ""
+  <None>
+
+  >>> let empty = Re.group Re.empty in t empty "x"
+  <None>
+
+### Zero-length group
+
+  >>> let r = Re.group Re.bos in t r ""
+  (Group( (0 0))( (0 0)))
+
+  >>> let r = Re.group Re.bos in t r "x"
+  (Group( (0 0))( (0 0)))
+
+### No group
+
+  >>> t Re.any ""
+  <None>
+
+  >>> t Re.any "."
+  (Group(. (0 1)))
+
+### Two adjacent groups
+
+  >>> let r = Re.seq [ Re.group Re.any; Re.group Re.any ] in t r "a"
+  <None>
+
+  >>> let r = Re.seq [ Re.group Re.any; Re.group Re.any ] in t r "ab"
+  (Group(ab (0 2))(a (0 1))(b (1 2)))
+
+  >>> let r = Re.seq [ Re.group Re.any; Re.group Re.any ] in t r "abc"
+  (Group(ab (0 2))(a (0 1))(b (1 2)))
+
+### Nested groups
+
+  >>> let r = Re.group (Re.seq [ Re.group (Re.char 'a'); Re.char 'b' ]) in t r "ab"
+  (Group(ab (0 2))(ab (0 2))(a (0 1)))
+
+### Group offsets when an optional group does not match
+
+  >>> let r = Re.seq [ Re.group (Re.char 'a');
+  ...                  Re.opt (Re.group (Re.char 'a'));
+  ...                  Re.group (Re.char 'b') ] in
+  ... let m = Re.exec (Re.compile r) "ab" in
+  ... Format.printf "%a@." (array offset) (Re.Group.all_offset m)
+  [| (0, 2); (0, 1); (-1, -1); (1, 2) |]
+
+### `no_group`
+
+  >>> let r = Re.seq [ Re.group (Re.char 'a');
+  ...                  Re.opt (Re.group (Re.char 'a'));
+  ...                  Re.group (Re.char 'b') ] in
+  ... test_re (Re.no_group r) "ab"
+  [| (0, 2) |]
+
+### `nest`
+
+  >>> let r = Re.rep (Re.nest (Re.alt [ Re.group (Re.char 'a'); Re.char 'b' ])) in
+  ... test_re r "ab"
+  [| (0, 2); (-1, -1) |]
+
+  >>> let r = Re.rep (Re.nest (Re.alt [ Re.group (Re.char 'a'); Re.char 'b' ])) in
+  ... test_re r "ba"
+  [| (0, 2); (1, 2) |]
+
+---
+
+## Repetition counts (from `test_repn.ml`)
+
+### Fixed repetition `{3,3}`
+
+  >>> let re = Re.compile (Re.repn (Re.char 'a') 3 (Some 3)) in
+  ... Format.printf "%b@." (Re.execp re "")
+  false
+
+  >>> let re = Re.compile (Re.repn (Re.char 'a') 3 (Some 3)) in
+  ... Format.printf "%b@." (Re.execp re "aa")
+  false
+
+  >>> let re = Re.compile (Re.repn (Re.char 'a') 3 (Some 3)) in
+  ... Format.printf "%b@." (Re.execp re "aaa")
+  true
+
+  >>> let re = Re.compile (Re.repn (Re.char 'a') 3 (Some 3)) in
+  ... Format.printf "%b@." (Re.execp re "aaaa")
+  true
+
+### `repn`
+
+  >>> test_re (Re.repn (Re.char 'a') 0 None) ""
+  [| (0, 0) |]
+
+  >>> test_re (Re.repn (Re.char 'a') 2 None) "a"
+  Not_found
+
+  >>> test_re (Re.repn (Re.char 'a') 2 None) "aa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.repn (Re.char 'a') 0 (Some 0)) ""
+  [| (0, 0) |]
+
+  >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) ""
+  Not_found
+
+  >>> test_re (Re.repn (Re.char 'a') 1 (Some 2)) "aaa"
+  [| (0, 2) |]
+
+### Invalid `repn` arguments
+
+  >>> invalid_argument (fun () -> Re.repn Re.empty (-1) None)
+  Invalid_argument "Re.repn"
+
+  >>> invalid_argument (fun () -> Re.repn Re.empty 1 (Some 0))
+  Invalid_argument "Re.repn"
+
+  >>> invalid_argument (fun () -> Re.repn Re.empty 4 (Some 3))
+  Invalid_argument "Re.repn"
+
+### `rep1`
+
+  >>> test_re (Re.rep1 (Re.char 'a')) "a"
+  [| (0, 1) |]
+
+  >>> test_re (Re.rep1 (Re.char 'a')) "aa"
+  [| (0, 2) |]
+
+  >>> test_re (Re.rep1 (Re.char 'a')) ""
+  Not_found
+
+  >>> test_re (Re.rep1 (Re.char 'a')) "b"
+  Not_found
+
+### `opt`
+
+  >>> test_re (Re.opt (Re.char 'a')) ""
+  [| (0, 0) |]
+
+  >>> test_re (Re.opt (Re.char 'a')) "a"
+  [| (0, 1) |]
+
+---
+
+## Iteration (from `test_iter.ml`)
+
+  >>> let re = Re.Posix.compile_pat "(ab)+" in
+  ... strings (Re.matches re "aabab aaabba  dab ")
+  ["abab"; "ab"; "ab"]
+
+  >>> let re = Re.Posix.compile_pat "(ab)+" in
+  ... strings (Re.matches ~pos:2 ~len:7 re "abab ababab")
+  ["ab"; "abab"]
+
+  >>> strings (Re.matches re_empty "ab")
+  [""; ""; ""]
+
+  >>> strings (Re.matches (Re.compile (Re.rep (Re.char 'a'))) "cat")
+  [""; "a"; ""]
+
+---
+
+## Splitting (from `test_split.ml`)
+
+### `split`
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split re_ws "aa bb c d ")
+  ["aa"; "bb"; "c"; "d"]
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split ~pos:1 ~len:4 re_ws "aa b c d")
+  ["a"; "b"]
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split re_ws " a full_word bc   ")
+  ["a"; "full_word"; "bc"]
+
+  >>> strings (Re.split re_empty "abcd")
+  ["a"; "b"; "c"; "d"]
+
+  >>> strings (Re.split re_eol "a\nb")
+  ["a"; "\nb"]
+
+  >>> strings (Re.split re_bow "a b")
+  ["a "; "b"]
+
+  >>> strings (Re.split re_eow "a b")
+  ["a"; " b"]
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split re_ws "")
+  []
+
+  >>> strings (Re.split re_empty "")
+  []
+
+### `split_delim`
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split_delim re_ws "aa bb c d ")
+  ["aa"; "bb"; "c"; "d"; ""]
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... strings (Re.split_delim ~pos:1 ~len:4 re_ws "aa b c d")
+  ["a"; "b"; ""]
+
+  >>> strings (Re.split_delim re_empty "abcd")
+  [""; "a"; "b"; "c"; "d"; ""]
+
+  >>> strings (Re.split_delim re_eol "a\nb")
+  ["a"; "\nb"; ""]
+
+  >>> strings (Re.split_delim re_empty "")
+  [""; ""]
+
+### `split_full`
+
+  >>> let split_full ?pos ?len re s =
+  ...   let res = Re.split_full ?pos ?len re s in
+  ...   Format.printf "[";
+  ...   List.iteri (fun i what ->
+  ...     if i > 0 then Format.printf "; ";
+  ...     match what with
+  ...     | `Text s -> Format.printf "`T %S" s
+  ...     | `Delim g -> Format.printf "`D %S" (Re.Group.get g 0)) res;
+  ...   Format.printf "]@."
+  ... ;;
+  val split_full : ?pos:int -> ?len:int -> Re.re -> string -> unit = <fun>
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... split_full re_ws "aa bb c d "
+  [`T "aa"; `D " "; `T "bb"; `D " "; `T "c"; `D " "; `T "d"; `D " "]
+
+  >>> let re_ws = Re.Posix.compile_pat "[\t ]+" in
+  ... split_full ~pos:1 ~len:5 re_ws "aa \tb c d"
+  [`T "a"; `D " \t"; `T "b"; `D " "]
+
+  >>> split_full re_empty "ab"
+  [`D ""; `T "a"; `D ""; `T "b"; `D ""]
+
+  >>> split_full (Re.compile (Re.rep (Re.char 'a'))) "cat"
+  [`D ""; `T "c"; `D "a"; `T "t"; `D ""]
+
+---
+
+## Replacement (from `test_replace.ml`)
+
+  >>> let re = Re.Posix.compile_pat "[a-zA-Z]+" in
+  ... let f sub = String.capitalize_ascii (Re.Group.get sub 0) in
+  ... Format.printf "%s@." (Re.replace re ~f " hello world; I love chips!")
+   Hello World; I Love Chips!
+
+Replace only the first occurrence.
+
+  >>> let re = Re.Posix.compile_pat "[a-zA-Z]+" in
+  ... let f sub = String.capitalize_ascii (Re.Group.get sub 0) in
+  ... Format.printf "%s@." (Re.replace ~all:false re ~f " allo maman, bobo")
+   Allo maman, bobo
+
+Empty pattern.
+
+  >>> Format.printf "%s@." (Re.replace re_empty ~f:(fun _ -> "a") "")
+  a
+
+`a*` against `cat`.
+
+  >>> Format.printf "%s@."
+  ...   (Re.replace (Re.compile (Re.rep (Re.char 'a'))) ~f:(fun _ -> "*") "cat")
+  *c*t*
+
+### `replace_string`
+
+  >>> let re = Re.Posix.compile_pat "_[a-zA-Z]+_" in
+  ... Format.printf "%s@." (Re.replace_string re ~by:"goodbye" "_hello_ world")
+  goodbye world
+
+  >>> let re = Re.Posix.compile_pat "_[a-zA-Z]+_" in
+  ... Format.printf "%s@." (Re.replace_string ~all:false re ~by:"brown" "The quick _XXX_ fox")
+  The quick brown fox
+
+### Regression: bug 55
+
+  >>> let re = Re.compile Re.bol in
+  ... Format.printf "%s@." (Re.replace_string re ~by:"z" "abc")
+  zabc
+
+  >>> let re = Re.compile Re.eow in
+  ... Format.printf "%s@." (Re.replace_string re ~by:"X" "one two three")
+  oneX twoX threeX
+
+---
+
+## Marks (from `test_mark.ml`)
+
+  >>> let test_mark ?pos ?len r s il1 il2 =
+  ...   let subs = Re.exec ?pos ?len (Re.compile r) s in
+  ...   Format.printf "%b@."
+  ...     (List.for_all (Re.Mark.test subs) il1
+  ...      && List.for_all (fun x -> not (Re.Mark.test subs x)) il2)
+  ... ;;
+  val test_mark :
+    ?pos:int ->
+    ?len:int -> Re.t -> string -> Re.Mark.t list -> Re.Mark.t list -> unit =
+    <fun>
+
+A simple mark fires when its sub-expression matches.
+
+  >>> let i, r = Re.mark Re.digit in test_mark r "0" [ i ] []
+  true
+
+Mark inside a sequence.
+
+  >>> let i, r = Re.mark Re.digit in
+  ... let r = Re.seq [ r; r ] in
+  ... test_mark r "02" [ i ] []
+  true
+
+Mark inside a repetition.
+
+  >>> let i, r = Re.mark Re.digit in
+  ... let r = Re.rep r in
+  ... test_mark r "02" [ i ] []
+  true
+
+Marks inside alternation track which branch fired.
+
+  >>> let ia, ra = Re.mark (Re.char 'a') in
+  ... let ib, rb = Re.mark (Re.char 'b') in
+  ... let r = Re.alt [ ra; rb ] in
+  ... test_mark r "a" [ ia ] [ ib ];
+  ... test_mark r "b" [ ib ] [ ia ]
+  true
+  true
+
+Mark prefers leftmost branch.
+
+  >>> let two_chars = Re.seq [ Re.any; Re.any ] in
+  ... let lhs, x = Re.mark two_chars in
+  ... let rhs, x' = Re.mark two_chars in
+  ... let r = Re.alt [ x; x' ] in
+  ... test_mark r "aa" [ lhs ] [ rhs ]
+  true
+
+---
+
+## Partial matches (from `test_partial.ml`)
+
+  >>> let exec_partial re s =
+  ...   let re = Re.compile re in
+  ...   let res = Re.exec_partial re s in
+  ...   Format.printf "`%s@."
+  ...     (match res with
+  ...      | `Partial -> "Partial"
+  ...      | `Full -> "Full"
+  ...      | `Mismatch -> "Mismatch")
+  ... ;;
+  val exec_partial : Re.t -> string -> unit = <fun>
+
+  >>> exec_partial (Re.str "hello") "he"
+  `Partial
+
+  >>> exec_partial (Re.str "hello") "goodbye"
+  `Partial
+
+  >>> exec_partial (Re.str "hello") "hello"
+  `Partial
+
+  >>> exec_partial (Re.whole_string (Re.str "hello")) "hello"
+  `Partial
+
+  >>> exec_partial (Re.whole_string (Re.str "hello")) "goodbye"
+  `Mismatch
+
+  >>> exec_partial (Re.str "hello") ""
+  `Partial
+
+  >>> exec_partial (Re.str "") "hello"
+  `Full
+
+  >>> exec_partial (Re.whole_string (Re.str "hello")) ""
+  `Partial
+
+### `exec_partial_detailed`
+
+  >>> let exec_partial_detailed ?pos re s =
+  ...   let re = Re.compile re in
+  ...   match Re.exec_partial_detailed ?pos re s with
+  ...   | `Mismatch -> Format.printf "`Mismatch@."
+  ...   | `Partial p -> Format.printf "`Partial %d@." p
+  ...   | `Full g ->
+  ...     Format.printf "`Full [|";
+  ...     let offs = Re.Group.all_offset g in
+  ...     Array.iteri (fun i (a, b) ->
+  ...       if i > 0 then Format.printf ";";
+  ...       let m =
+  ...         match String.sub s a (b - a) with
+  ...         | exception Invalid_argument _ -> "<No match>"
+  ...         | x -> Printf.sprintf "%S" x
+  ...       in
+  ...       Format.printf "%d,%d,%s" a b m) offs;
+  ...     Format.printf "|]@."
+  ... ;;
+  val exec_partial_detailed : ?pos:int -> Re.t -> string -> unit = <fun>
+
+  >>> exec_partial_detailed (Re.str "hello") "he"
+  `Partial 0
+
+  >>> exec_partial_detailed (Re.str "hello") "goodbye"
+  `Partial 6
+
+  >>> exec_partial_detailed (Re.str "hello") "hello"
+  `Full [|0,5,"hello"|]
+
+  >>> exec_partial_detailed (Re.whole_string (Re.str "hello")) "hello"
+  `Full [|0,5,"hello"|]
+
+  >>> exec_partial_detailed (Re.whole_string (Re.str "hello")) "goodbye"
+  `Mismatch
+
+  >>> exec_partial_detailed (Re.str "hello") ""
+  `Partial 0
+
+  >>> exec_partial_detailed (Re.str "") "hello"
+  `Full [|0,0,""|]
+
+  >>> exec_partial_detailed (Re.whole_string (Re.str "hello")) ""
+  `Partial 0
+
+  >>> exec_partial_detailed (Re.str "abc") ".ab.ab"
+  `Partial 4
+
+  >>> exec_partial_detailed ~pos:1 (Re.seq [ Re.not_boundary; Re.str "b" ]) "ab"
+  `Full [|1,2,"b"|]
+
+  >>> exec_partial_detailed (Re.seq [ Re.group (Re.str "a"); Re.rep Re.any; Re.group (Re.str "b") ]) ".acb."
+  `Full [|1,4,"acb";1,2,"a";3,4,"b"|]
+
+---
+
+## Backward ranges (from `test_186.ml`)
+
+The four dialects all parse a backward range `[1-0]` etc. without error.
+
+  >>> let print_result fmt r =
+  ...   Format.fprintf fmt "%s"
+  ...     (match r with
+  ...      | Ok _ -> "backward range parsed"
+  ...      | Error `Parse_error -> "parse error"
+  ...      | Error `Not_supported -> "not supported")
+  ... ;;
+  val print_result :
+    Format.formatter -> ('a, [< `Not_supported | `Parse_error ]) result -> unit =
+    <fun>
+
+  >>> let cases = [ "[1-0]"; "[5-1]"; "[6-6]"; "[z-a]"; "[b-b]" ] ;;
+  val cases : string list = ["[1-0]"; "[5-1]"; "[6-6]"; "[z-a]"; "[b-b]"]
+
+  >>> List.iter (fun re -> Format.printf "%s: %a@." re print_result (Re.Perl.re_result re)) cases
+  [1-0]: backward range parsed
+  [5-1]: backward range parsed
+  [6-6]: backward range parsed
+  [z-a]: backward range parsed
+  [b-b]: backward range parsed
+
+  >>> List.iter (fun re -> Format.printf "%s: %a@." re print_result (Re.Pcre.re_result re)) cases
+  [1-0]: backward range parsed
+  [5-1]: backward range parsed
+  [6-6]: backward range parsed
+  [z-a]: backward range parsed
+  [b-b]: backward range parsed
+
+  >>> List.iter (fun re -> Format.printf "%s: %a@." re print_result (Re.Posix.re_result re)) cases
+  [1-0]: backward range parsed
+  [5-1]: backward range parsed
+  [6-6]: backward range parsed
+  [z-a]: backward range parsed
+  [b-b]: backward range parsed
+
+  >>> List.iter (fun re -> Format.printf "%s: %a@." re print_result (Re.Emacs.re_result re)) cases
+  [1-0]: backward range parsed
+  [5-1]: backward range parsed
+  [6-6]: backward range parsed
+  [z-a]: backward range parsed
+  [b-b]: backward range parsed
+
+A backward range constructed directly via `Re.rg` is allowed.
+
+  >>> Format.printf "%a@." Re.pp (Re.rg '5' '0')
+  (Set 48-53)
+
+  >>> Format.printf "%a@." Re.pp (Re.rg '0' '5')
+  (Set 48-53)
+
+---
+
+## Glob patterns (from `test_glob.ml`)
+
+  >>> let glob ?match_backslashes ?expand_braces ?anchored ?pathname ?period re s =
+  ...   let re =
+  ...     Re.Glob.glob ?match_backslashes ?expand_braces ?anchored ?pathname ?period re
+  ...     |> Re.compile
+  ...   in
+  ...   Format.printf "%b@." (Re.execp re s)
+  ... ;;
+  val glob :
+    ?match_backslashes:bool ->
+    ?expand_braces:bool ->
+    ?anchored:bool ->
+    ?pathname:bool -> ?period:bool -> string -> string -> unit = <fun>
+
+### Basic globs
+
+  >>> glob "foo*" "foobar"
+  true
+
+  >>> glob "fo?bar" "fobar"
+  false
+
+  >>> glob "fo?bar" "foobar"
+  true
+
+  >>> glob "fo?bar" "foo0bar"
+  false
+
+  >>> glob "?oobar" "foobar"
+  true
+
+  >>> glob "*bar" "foobar"
+  true
+
+  >>> glob "\\*bar" "foobar"
+  false
+
+  >>> glob "\\*bar" "*bar"
+  true
+
+  >>> glob "[ab]foo" "afoo"
+  true
+
+  >>> glob "[ab]foo" "bfoo"
+  true
+
+  >>> glob "[ab]foo" "cfoo"
+  false
+
+  >>> glob "c[ab]foo" "cabfoo"
+  false
+
+  >>> glob ".foo" ".foo"
+  true
+
+  >>> glob ".foo" "afoo"
+  false
+
+  >>> glob "*[.]foo" "a.foo"
+  true
+
+  >>> glob "*[.]foo" "ba.foo"
+  true
+
+  >>> glob "*.foo" ".foo"
+  false
+
+  >>> glob "*[.]foo" ".foo"
+  false
+
+  >>> glob ~anchored:true "*/foo" "/foo"
+  true
+
+  >>> glob ~anchored:true "foo/*" "foo/"
+  true
+
+  >>> glob "/[^f]" "/foo"
+  false
+
+  >>> glob "/[^f]" "/bar"
+  true
+
+  >>> glob ~anchored:true "/[^f]" "/bar"
+  false
+
+  >>> glob ~anchored:true "*" ".bar"
+  false
+
+  >>> glob "foo[.]bar" "foo.bar"
+  true
+
+  >>> glob "[.]foo" ".foo"
+  false
+
+  >>> glob "foo[/]bar" "foo/bar"
+  false
+
+  >>> glob ~anchored:true "*bar" "foobar"
+  true
+
+  >>> glob "foo" "foobar"
+  true
+
+  >>> glob "bar" "foobar"
+  true
+
+  >>> glob ~anchored:true "foo" "foobar"
+  false
+
+  >>> glob ~anchored:true "bar" "foobar"
+  false
+
+  >>> glob "{foo,bar}bar" "foobar"
+  false
+
+  >>> glob "{foo,bar}bar" "{foo,bar}bar"
+  true
+
+  >>> glob "foo?bar" "foo/bar"
+  false
+
+### Brace expansion
+
+  >>> glob ~expand_braces:true "{foo,far}bar" "foobar"
+  true
+
+  >>> glob ~expand_braces:true "{foo,far}bar" "farbar"
+  true
+
+  >>> glob ~expand_braces:true "{foo,far}bar" "{foo,far}bar"
+  false
+
+### Double asterisk
+
+  >>> glob ~anchored:true "**" "foobar"
+  true
+
+  >>> glob ~anchored:true "**" "foo/bar"
+  true
+
+  >>> glob ~anchored:true "**/bar" "foo/bar"
+  true
+
+  >>> glob ~anchored:true "**/bar" "foo/far/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**" "foo"
+  false
+
+  >>> glob ~anchored:true "foo/**" "foo/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**" "foo/far/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar" "foo/far/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar" "foo/far/oof/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**bar" "foo/far/oofbar"
+  true
+
+  >>> glob ~anchored:true "foo/**bar" "foo/bar"
+  true
+
+  >>> glob ~anchored:true "foo/**bar" "foo/foobar"
+  true
+
+  >>> glob ~anchored:true "/**" "//foo"
+  true
+
+  >>> glob ~anchored:true "/**" "/"
+  true
+
+  >>> glob ~anchored:true "/**" "/x"
+  true
+
+  >>> glob ~anchored:true "**" "foo//bar"
+  true
+
+  >>> glob ~anchored:true "foo/bar/**/*.ml" "foo/bar/baz/foobar.ml"
+  true
+
+  >>> glob ~anchored:true "foo/bar/**/*.ml" "foo/bar/foobar.ml"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/bar/baz"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/bar/x/y/z/baz"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/x/y/z/bar/baz"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/bar/x/bar/x/baz"
+  true
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/bar/../x/baz"
+  false
+
+  >>> glob ~anchored:true "foo/**/bar/**/baz" "foo/bar/./x/baz"
+  false
+
+### Backslash handling
+
+  >>> glob ~anchored:true ~match_backslashes:false "a/b/c" "a\\b/c"
+  false
+
+  >>> glob ~anchored:true ~match_backslashes:false "a\\b" "ab"
+  true
+
+  >>> glob ~anchored:true ~match_backslashes:false "a/*.ml" "a/b\\c.ml"
+  true
+
+  >>> glob ~anchored:true ~match_backslashes:true "a/b/c" "a\\b/c"
+  true
+
+  >>> glob ~anchored:true ~match_backslashes:true "a/b/*.ml" "a\\b\\c.ml"
+  true
+
+  >>> glob ~anchored:true ~match_backslashes:true "/" "\\"
+  true
+
+---
+
+## Perl dialect (from `test_perl.ml`)
+
+  >>> let re ?opts s = Format.printf "%a@." Re.pp (Re.Perl.re ?opts s) ;;
+  val re : ?opts:Re.Perl.opt list -> string -> unit = <fun>
+
+  >>> let try_parse ?opts s =
+  ...   try ignore (Re.Perl.re ?opts s);
+  ...     Format.printf "Parsed successfully@."
+  ...   with
+  ...   | Re.Perl.Parse_error -> Format.printf "Parse error@."
+  ...   | Re.Perl.Not_supported -> Format.printf "Not supported@."
+  ... ;;
+  val try_parse : ?opts:Re.Perl.opt list -> string -> unit = <fun>
+
+### Escaping meta characters
+
+  >>> re "\\^"
+  (Set 94)
+
+  >>> re "\\."
+  (Set 46)
+
+  >>> re "\\$"
+  (Set 36)
+
+  >>> re "\\|"
+  (Set 124)
+
+  >>> re "\\("
+  (Set 40)
+
+  >>> re "\\)"
+  (Set 41)
+
+  >>> re "\\["
+  (Set 91)
+
+  >>> re "\\]"
+  (Set 93)
+
+  >>> re "\\*"
+  (Set 42)
+
+  >>> re "\\+"
+  (Set 43)
+
+  >>> re "\\?"
+  (Set 63)
+
+  >>> re "\\\\"
+  (Set 92)
+
+### Basic metacharacters
+
+  >>> re "^"
+  Beg_of_str
+
+  >>> re "."
+  (Set 0-9, 11-255)
+
+  >>> re "$"
+  End_of_str
+
+  >>> re "a|b"
+  (Alternative (Set 97)(Set 98))
+
+  >>> re "aa|bb"
+  (Alternative (Sequence (Set 97)(Set 97))(Sequence (Set 98)(Set 98)))
+
+  >>> re "(a)"
+  (Group (Set 97))
+
+  >>> re "(a|b)c"
+  (Sequence (Group (Alternative (Set 97)(Set 98)))(Set 99))
+
+  >>> re "[ab]"
+  (Alternative (Set 98)(Set 97))
+
+  >>> re "[a-z]"
+  (Set 97-122)
+
+  >>> re "[^a-z]"
+  (Complement (Set 97-122))
+
+### Greedy quantifiers
+
+  >>> re "a*"
+  (Sem_greedy Greedy (Repeat (Set 97) 0))
+
+  >>> re "a+"
+  (Sem_greedy Greedy (Repeat (Set 97) 1))
+
+  >>> re "a?"
+  (Sem_greedy Greedy (Repeat (Set 97) 0 1))
+
+  >>> re "a{10}"
+  (Sem_greedy Greedy (Repeat (Set 97) 10 10))
+
+  >>> re "a{10,}"
+  (Sem_greedy Greedy (Repeat (Set 97) 10))
+
+  >>> re "a{10,12}"
+  (Sem_greedy Greedy (Repeat (Set 97) 10 12))
+
+### Non-greedy quantifiers
+
+  >>> re "a*?"
+  (Sem_greedy Non_greedy (Repeat (Set 97) 0))
+
+  >>> re "a+?"
+  (Sem_greedy Non_greedy (Repeat (Set 97) 1))
+
+  >>> re "a??"
+  (Sem_greedy Non_greedy (Repeat (Set 97) 0 1))
+
+### Character classes
+
+  >>> re "\\s"
+  (Set 9-13, 32)
+
+  >>> re "\\S"
+  (Complement (Set 9-13, 32))
+
+  >>> re "\\d"
+  (Set 48-57)
+
+  >>> re "\\D"
+  (Complement (Set 48-57))
+
+### Zero-width assertions
+
+  >>> re "\\b"
+  (Alternative Beg_of_wordEnd_of_word)
+
+  >>> re "\\B"
+  Not_bound
+
+  >>> re "\\A"
+  Beg_of_str
+
+  >>> re "\\Z"
+  Last_end_of_line
+
+  >>> re "\\z"
+  End_of_str
+
+  >>> re "\\G"
+  Start
+
+### Options
+
+  >>> re ~opts:[ `Anchored ] "a"
+  (Sequence Start(Set 97))
+
+  >>> re ~opts:[ `Caseless ] "b"
+  (No_case (Set 98))
+
+  >>> re ~opts:[ `Dollar_endonly ] "$"
+  Last_end_of_line
+
+  >>> re ~opts:[ `Dollar_endonly; `Multiline ] "$"
+  End_of_line
+
+  >>> re ~opts:[ `Dotall ] "."
+  (Set 0-255)
+
+  >>> re ~opts:[ `Multiline ] "^"
+  Beg_of_line
+
+  >>> re ~opts:[ `Multiline ] "$"
+  End_of_line
+
+  >>> re ~opts:[ `Ungreedy ] "a*"
+  (Sem_greedy Non_greedy (Repeat (Set 97) 0))
+
+  >>> re ~opts:[ `Ungreedy ] "a*?"
+  (Sem_greedy Greedy (Repeat (Set 97) 0))
+
+### Clustering, comments, backrefs
+
+  >>> re "(?:a)"
+  (Set 97)
+
+  >>> re "(?:a|b)c"
+  (Sequence (Alternative (Set 97)(Set 98))(Set 99))
+
+  >>> re "a(?#comment)b"
+  (Sequence (Set 97)(Sequence )(Set 98))
+
+  >>> try_parse "(?#"
+  Parse error
+
+  >>> try_parse "\\0"
+  Not supported
+
+---
+
+## Emacs dialect (from `test_emacs.ml`)
+
+  >>> let ere s = Format.printf "%a@." Re.pp (Re.Emacs.re s) ;;
+  val ere : string -> unit = <fun>
+
+### Not supported
+
+  >>> let try_parse s =
+  ...   try ignore (Re.Emacs.re s) with
+  ...   | Re.Emacs.Parse_error -> Format.printf "Parse error@."
+  ...   | Re.Emacs.Not_supported -> Format.printf "Not supported@."
+  ... ;;
+  val try_parse : string -> unit = <fun>
+
+  >>> try_parse "*ab"
+  Parse error
+
+  >>> try_parse "+ab"
+  Parse error
+
+  >>> try_parse "?ab"
+  Parse error
+
+  >>> try_parse "\\0"
+  Not supported
+
+### Special characters
+
+  >>> ere "."
+  (Set 0-9, 11-255)
+
+  >>> ere "a*"
+  (Repeat (Set 97) 0)
+
+  >>> ere "a+"
+  (Repeat (Set 97) 1)
+
+  >>> ere "a?"
+  (Repeat (Set 97) 0 1)
+
+  >>> ere "[ab]"
+  (Alternative (Set 98)(Set 97))
+
+  >>> ere "[a-z]"
+  (Set 97-122)
+
+  >>> ere "^"
+  Beg_of_line
+
+  >>> ere "$"
+  End_of_line
+
+### Alternatives and grouping
+
+  >>> ere "a\\|b"
+  (Alternative (Set 97)(Set 98))
+
+  >>> ere "\\(a\\)"
+  (Group (Set 97))
+
+  >>> ere "\\(a\\|b\\)c"
+  (Sequence (Group (Alternative (Set 97)(Set 98)))(Set 99))
+
+### Contexts
+
+  >>> ere "\\`"
+  Beg_of_str
+
+  >>> ere "\\'"
+  End_of_str
+
+  >>> ere "\\="
+  Start
+
+  >>> ere "\\b"
+  (Alternative Beg_of_wordEnd_of_word)
+
+  >>> ere "\\B"
+  Not_bound
+
+  >>> ere "\\<"
+  Beg_of_word
+
+  >>> ere "\\>"
+  End_of_word
+
+---
+
+## PCRE split (from `test_pcre_split.ml`)
+
+  >>> let split ~rex s = Re.Pcre.split ~rex s |> strings ;;
+  val split : rex:Re.Pcre.regexp -> string -> unit = <fun>
+
+  >>> split ~rex:re_whitespace "aa bb c d "
+  ["aa"; "bb"; "c"; "d"]
+
+  >>> split ~rex:re_whitespace " a full_word bc   "
+  ["a"; "full_word"; "bc"]
+
+  >>> split ~rex:re_empty "abcd"
+  ["a"; "b"; "c"; "d"]
+
+  >>> split ~rex:re_eol "a\nb"
+  ["a"; "\nb"]
+
+  >>> split ~rex:re_bow "a b"
+  ["a "; "b"]
+
+  >>> split ~rex:re_eow "a b"
+  ["a"; " b"]
+
+  >>> let rex = Re.Pcre.regexp "" in split ~rex "xx"
+  ["x"; "x"]
+
+### `full_split`
+
+  >>> let full_split ?max ~rex s =
+  ...   let res = Re.Pcre.full_split ?max ~rex s in
+  ...   Format.printf "[";
+  ...   List.iteri (fun i what ->
+  ...     if i > 0 then Format.printf "; ";
+  ...     match (what : Re.Pcre.split_result) with
+  ...     | Text s -> Format.printf "Text %S" s
+  ...     | Delim s -> Format.printf "Delim %S" s
+  ...     | NoGroup -> Format.printf "NoGroup"
+  ...     | Group (x, s) -> Format.printf "Group (%d, %S)" x s) res;
+  ...   Format.printf "]@."
+  ... ;;
+  val full_split : ?max:int -> rex:Re.Pcre.regexp -> string -> unit = <fun>
+
+  >>> full_split ~rex:(Re.Pcre.regexp "x(x)?") "testxxyyy"
+  [Text "test"; Delim "xx"; Group (1, "x"); Text "yyy"]
+
+  >>> full_split ~rex:(Re.Pcre.regexp "x(x)?") "testxyyy"
+  [Text "test"; Delim "x"; NoGroup; Text "yyy"]
+
+  >>> full_split ~rex:(Re.Pcre.regexp "[:_]") ""
+  []
+
+  >>> full_split ~max:1 ~rex:(Re.Pcre.regexp "[:_]") "xxx:yyy"
+  [Text "xxx:yyy"]
+
+---
+
+## POSIX (from `test_posix.ml`)
+
+  >>> let re = Re.Posix.compile_pat {|a[[:space:]]b|} in
+  ... let exec = Re.execp re in
+  ... Format.printf "%b %b %b@." (exec "a b") (exec "ab") (exec "a_b")
+  true false false
+
+---
+
+## Color (from `test_color.ml`)
+
+A regex matching every byte distinguishes every single character.
+
+  >>> let all_chars = String.init 256 Char.chr in
+  ... let re = Re.set all_chars |> Re.whole_string |> Re.compile in
+  ... let ok = ref true in
+  ... for i = 0 to String.length all_chars - 1 do
+  ...   if not (Re.execp re (String.make 1 all_chars.[i])) then ok := false
+  ... done;
+  ... Format.printf "%b@." !ok
+  true
+
+---
+
+## View (from `test_view.ml`)
+
+`Re.View.view` exposes the structure of a compiled-friendly regex.
+
+  >>> let _view = Re.View.view (Re.str "foo") in
+  ... Format.printf "ok@."
+  ok
+
+---
+
+## Validation (from `test_validation.ml`)
+
+Out-of-bounds positions raise `Invalid_argument`.
+
+  >>> let any_re = Re.compile (Re.rep Re.any) in
+  ... let _ = Re.execp any_re ~pos:4 "foo" in
+  ... Format.printf "ok@."
+  ok
+
+  >>> let any_re = Re.compile (Re.rep Re.any) in
+  ... invalid_argument (fun () -> Re.execp any_re ~pos:1 ~len:3 "foo")
+  Invalid_argument "Re.exec: out of bounds"
+
+---
+
+## Tests omitted from this script
+
+The following expect-test files are intentionally **not** mirrored here because
+they exercise internal modules (`Re_private.Cset`, `Re_private.Automata`,
+`Re_private.Bit_vector`, `Re_private.Hash_set`, `Re_private.Pcre` private
+helpers, `Re_private.Ast`, `Re_private.Category`) that are not exposed by the
+public `re` library and therefore cannot be loaded from a top-level using only
+`re.cma`:
+
+- `test_csets.ml`
+- `test_category.ml`
+- `test_bit_vector.ml`
+- `test_hashset.ml`
+- `test_automata.ml`
+- `test_alternation.ml`
+- `test_pcre.ml` (uses `Re_private.Pcre` and `Re_private.Ast`)
+- `test_pcre_288.ml` (uses `Re_private.Pcre`)
+- `test_str.ml` (compares against the stdlib `Str` via internal helpers)
+- `test_stream.ml` (uses public `Re.Stream` but is large; can be added in a
+  follow-up by rewriting its `Printf.printf` helpers to `Format.printf`)
+
+The original `let%expect_test`s for these files continue to run unchanged
+under `dune runtest`.

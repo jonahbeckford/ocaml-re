@@ -2,3 +2,24 @@
  (_
   (flags
    (:standard -w -50))))
+
+(include dune-examples.inc)
+
+(rule
+ (target EXAMPLES.actual.md)
+ (package re)
+ (deps EXAMPLES.md.ml.u)
+ (action
+  (run %{bin:U2Markdown} --toc -o %{target} %{deps})))
+
+(rule
+ (alias gen-unified)
+ (package re)
+ (deps EXAMPLES.actual.md)
+ (action
+  (diff EXAMPLES.md %{deps})))
+ 
+(alias
+ (name runtest)
+ (package re)
+ (deps gen-unified))

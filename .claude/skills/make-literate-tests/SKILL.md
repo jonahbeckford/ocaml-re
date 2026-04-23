@@ -1,7 +1,6 @@
 ---
 name: make-literate-tests
 description: Translates OCaml expect tests into unified scripts that can be incrementally adopted, tested and rendered into readable documentation.
-argument-hint: "[expect tests directory]"
 ---
 
 # Make Literate Tests Skill
@@ -11,12 +10,6 @@ This skill guides you through converting OCaml `ppx_expect` tests into **unified
 When a unified script is run, an update to the unified script is generated where the executable commands have been executed and new responses captured. To test, the updated script is diffed against the original ("expected") script.
 
 For the full unified script reference, see https://github.com/diskuv/dk/blob/V2_5/docs/UNIFIED_SCRIPTS.md.
-
----
-name: make-literate-tests
-description: Translates OCaml expect tests into unified scripts that can be incrementally adopted, tested and rendered into readable documentation.
-argument-hint: "[expect tests directory]"
----
 
 ## What are `.md.ml.u` Unified Scripts?
 
@@ -312,6 +305,16 @@ Create `dune-examples.inc` by running:
     (mode promote)
     (action
      (run %{bin:U2Markdown} --toc -o %{target} %{deps})))
+   (rule
+    (alias gen-unified)
+    (package <package-name>)
+    (deps EXAMPLES.actual.md)
+    (action
+     (diff EXAMPLES.md %{deps})))
+   (alias
+    (name runtest)
+    (package <package-name>)
+    (deps gen-unified))
    ```
 
 **Rule summary:**
@@ -324,15 +327,17 @@ Create `dune-examples.inc` by running:
 
 ### Review and promote
 
-Rerun the unified tests; Dune will print diffs for each test.
+Rerun the unified tests. Dune will print diffs for each test, and regenerate `EXAMPLES.md` to a private staging area. 
 
 ```bash
-opam exec -- dune build '@test-unified' EXAMPLES.md
+opam exec -- dune build '@test-unified' '@gen-unified'
 ```
+
+On Windows ignore the error `error: Could not access '<the-project-directory>\nul'`.
 
 Compare the diff to see if the new response lines match your original `[%expect]` blocks.
 
-Once satisfied, promote the actual output as the new expected baseline:
+Once satisfied, promote the actual output as the new expected baseline, and promote `EXAMPLES.md` to the project root:
 
 ```bash
 opam exec -- dune promote
