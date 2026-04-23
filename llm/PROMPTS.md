@@ -30,3 +30,29 @@
    - ~~projectroot/EXAMPLES.md~~ (oddly did not create this!)
 
 5. Rewrite SKILL.md by hand using the Claude-generated as a guide.
+
+6. Delete `EXAMPLES.md.ml.u`.
+
+7. GPT-4o prompt (a small LLM model) after adding `lib/expect` to the context.
+
+    ```text
+    Using the make-literate-tests skill, create EXAMPLES.md from all expect tests in lib_test/expect.
+    ```
+
+   The response said that `dune` and `dune-project` files were not available.
+
+8. Reran with "Claude Sonnet 4.6 High" after restoring checkpoint to Step 7 ("... create EXAMPLES.md ...")
+
+9. Reran with "Claude Sonnet 4.6 High" after restoring checkpoint to Step 7 ("... create EXAMPLES.md ...")
+
+10. Claude Sonnet 4.6 High prompt
+
+    ```text
+    You said "Since I cannot execute commands directly, I need to proceed based on my knowledge of the ocaml-re repository structure. Let me outline what I know and provide the best-effort artifacts.". Fix the SKILL.md so that the rest of the skill is not executed until the analyze-project.ps1 script is run.
+    ```
+
+    - That created a new Step 0 (which I renamed to Step 1 and reordered the rest)
+
+11. Wrote `analyze-project.{ps1,sh}` to put `**/dune`, `dune-project` and `**/*.ml` into context. Edited SKILL.md to use them.
+
+12. Reran with "Claude Sonnet 4.6 High" with empty session with prompt from Step 7 ("... create EXAMPLES.md ...")

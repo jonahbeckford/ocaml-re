@@ -1,6 +1,7 @@
 ---
 name: make-literate-tests
 description: Translates OCaml expect tests into unified scripts that can be incrementally adopted, tested and rendered into readable documentation.
+argument-hint: "[expect tests directory]"
 ---
 
 # Make Literate Tests Skill
@@ -10,6 +11,12 @@ This skill guides you through converting OCaml `ppx_expect` tests into **unified
 When a unified script is run, an update to the unified script is generated where the executable commands have been executed and new responses captured. To test, the updated script is diffed against the original ("expected") script.
 
 For the full unified script reference, see https://github.com/diskuv/dk/blob/V2_5/docs/UNIFIED_SCRIPTS.md.
+
+---
+name: make-literate-tests
+description: Translates OCaml expect tests into unified scripts that can be incrementally adopted, tested and rendered into readable documentation.
+argument-hint: "[expect tests directory]"
+---
 
 ## What are `.md.ml.u` Unified Scripts?
 
@@ -33,7 +40,96 @@ Both unified tests and expect tests run with `dune runtest`.
 
 ---
 
-## Step 1: Install the Unified Script Tools
+## Step 1 (MANDATORY GATE): Analyze the Project
+
+> [!IMPORTANT]
+> **Do not proceed to any later step until this step has completed successfully.**
+> The remainder of this skill depends on concrete facts (package name, library
+> names, expect-test locations, helper signatures) that must come from the
+> actual repository — never from assumptions, prior knowledge, or training data.
+
+### Step 1.1 — Attempt direct workspace reads
+
+Try to read the following files directly from the workspace:
+
+1. `dune-project` — to find the package name
+2. All `**/dune` files — to find library names (`(library (name ...))` stanzas)
+3. All `**/*.ml` files containing `let%expect_test` — to find the expect tests to convert
+
+Do not ask the user to paste these files.
+
+### Step 1.2 — Fallback: run `analyze-project.ps1`
+
+If **any** of the files above cannot be read directly (for example, when the
+assistant has no filesystem tool, or the workspace is not mounted), you MUST
+stop and run [analyze-project.ps1](analyze-project.ps1) script
+in PowerShell on Windows from the project root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .claude\skills\make-literate-tests\analyze-project.ps1
+```
+
+or on Unix run [analyze-project.sh](analyze-project.sh):
+
+```bash
+sh .claude/skills/make-literate-tests/analyze-project.sh
+```
+
+The script will create `.make-literate-tests/analysis.txt` which has the contents of dune-project, dune files, and expect-test .ml files. 
+Then wait for the analysis.txt to be provided back before continuing.
+
+### Step 1.3 — Hard stop rule
+
+If, after Step 1.1 and Step 1.2, you still do not have **all** of the
+following concrete values, you MUST stop and ask the user to run
+`analyze-project.ps1` and paste its output. Do **not** guess, do **not**
+write `EXAMPLES.md.ml.u`, do **not** write `dune` rules, and do **not**
+emit shell commands for later steps.
+
+Required values before continuing:
+
+- [ ] Package name (from `dune-project`)
+- [ ] List of library names and their directories (from `dune` files)
+- [ ] List of `.ml` files containing `let%expect_test`
+- [ ] For each expect test: the helper function(s) it uses and their
+      signatures, so the skill can determine whether they use
+      `Format.printf` (convertible) or `Printf.printf` / `print_endline`
+      (must be rewritten)
+
+Only when every checkbox above is filled with real, verified data from the
+repository may you proceed to Step 2.
+
+> [!WARNING]
+> Producing a "best-effort" `EXAMPLES.md.ml.u` from assumed API shapes is a
+> skill failure. The unified script must mirror real expect tests in the
+> repository. If in doubt, stop and ask.
+
+---
+
+## Step 2: Install dependencies
+
+### Step 2.2 - Install test libraries
+
+Install test libraries with `opam install . --with-test --deps-only`:
+
+```bash
+# Check for a project-local opam wrapper (use it if present, else fall back)
+OPAM_BIN="opam"
+[ -x build/d/opam ] && OPAM_BIN="build/d/opam"
+[ -x build/d/opam.sh ]  && OPAM_BIN="build/d/opam.sh"
+
+$OPAM_BIN install . --with-test --deps-only -y
+```
+
+On Windows use PowerShell:
+```powershell
+$OPAM_BIN = if      (Test-Path "build\d\opam.exe") { "build\d\opam.exe" }
+            else if (Test-Path "build\d\opam.cmd") { "build\d\opam.cmd" }
+            else    { "opam" }
+& $OPAM_BIN install . --with-test --deps-only -y
+```
+
+### Step 2.2 - Install the Unified Script Tools
 
 Two tools are required; install them with `opam pin add`:
 
@@ -44,18 +140,18 @@ OPAM_BIN="opam"
 [ -x build/d/opam.sh ]  && OPAM_BIN="build/d/opam.sh"
 
 MLFRONT=https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz
-$OPAM_BIN pin add UnifiedScript_Std "$MLFRONT"
-$OPAM_BIN pin add UnifiedScript_Top "$MLFRONT"
+$OPAM_BIN pin add UnifiedScript_Std "$MLFRONT" -y
+$OPAM_BIN pin add UnifiedScript_Top "$MLFRONT" -y
 ```
 
 On Windows use PowerShell:
 ```powershell
-$OPAM_BIN = if     (Test-Path "build\d\opam.exe") { "build\d\opam.exe" }
-            elseif (Test-Path "build\d\opam.cmd") { "build\d\opam.cmd" }
-            else   { "opam" }
+$OPAM_BIN = if      (Test-Path "build\d\opam.exe") { "build\d\opam.exe" }
+            else if (Test-Path "build\d\opam.cmd") { "build\d\opam.cmd" }
+            else    { "opam" }
 $MLFRONT = "https://gitlab.com/dkml/build-tools/MlFront/-/releases/permalink/latest/downloads/MlFront.tar.gz"
-& $OPAM_BIN pin add UnifiedScript_Std $MLFRONT
-& $OPAM_BIN pin add UnifiedScript_Top $MLFRONT
+& $OPAM_BIN pin add UnifiedScript_Std $MLFRONT -y
+& $OPAM_BIN pin add UnifiedScript_Top $MLFRONT -y
 ```
 
 These install:
@@ -71,7 +167,7 @@ Update them with (no `&` on Unix):
 
 ---
 
-## Step 2: Create EXAMPLES.md.ml.u
+## Step 3: Create EXAMPLES.md.ml.u
 
 ### File Structure and Syntax Rules
 
@@ -167,7 +263,7 @@ Here is a minimal helper inlined into a unified script that prints the offsets o
   val test_re_exec_opt : ?pos:int -> ?len:int -> Re.t -> string -> unit = <fun>
 ```
 
-**Note**: The `val ... = <fun>` unified script lines come from the OCaml REPL printing the type of each defined function. They must be included in `EXAMPLES.md.ml.u` as expected output. Run `UCramRunner` once to discover the exact text (see Step 3).
+**Note**: The `val ... = <fun>` unified script lines come from the OCaml REPL printing the type of each defined function. They must be included in `EXAMPLES.md.ml.u` as expected output. Run `UCramRunner` once to discover the exact text (see Step 4).
   
 ### Content That Transfers Directly
 
@@ -175,22 +271,22 @@ Only tests whose output helpers use `Format.printf` (or write to `Format.std_for
 - ✅ Helpers like `test_re_exec_opt` that call `Format.printf`
 - ❌ Helpers that call `Printf.printf` or `print_endline` directly
 
-For tests using `Printf.printf`, either skip them or wrap the call:
+For tests using `Printf.printf`, wrap the call:
 ```ocaml
 let my_test arg = Format.printf "%s@." (compute_result arg)
 ```
 
 ---
 
-## Step 3: Run UCramRunner to Fill in Responses
+## Step 4: Run UCramRunner to Fill in Responses
 
 On the first run, create `EXAMPLES.md.ml.u` without response text.
 `UCramRunner` fills in the actual REPL output.
 
-### Build the project first
+### Build and test the project first
 
 ```bash
-opam exec -- dune build
+opam exec -- dune runtest
 ```
 
 ### Autoconfigure UCramRunner
@@ -213,13 +309,9 @@ Create `dune-examples.inc` by running:
     (target EXAMPLES.actual.md)
     (package <package-name>)
     (deps EXAMPLES.md.ml.u)
+    (mode promote)
     (action
      (run %{bin:U2Markdown} --toc -o %{target} %{deps})))
-   (rule
-    (alias runtest)
-    (package <package-name>)
-    (action
-    (diff EXAMPLES.md EXAMPLES.actual.md)))
    ```
 
 **Rule summary:**
@@ -232,10 +324,10 @@ Create `dune-examples.inc` by running:
 
 ### Review and promote
 
-Rerun the tests; Dune will print diffs for each test.
+Rerun the unified tests; Dune will print diffs for each test.
 
 ```bash
-opam exec -- dune build
+opam exec -- dune build '@test-unified' EXAMPLES.md
 ```
 
 Compare the diff to see if the new response lines match your original `[%expect]` blocks.
@@ -291,7 +383,7 @@ opam pin add UnifiedScript_Top https://gitlab.com/dkml/build-tools/MlFront/-/rel
 
 ### `[cram test failed]` on first run
 The `.md.ml.u` file has expected output that does not match. Either the code changed or the
-expected section was written incorrectly. Run UCramRunner manually (Step 3) to see what
+expected section was written incorrectly. Run UCramRunner manually (Step 4) to see what
 the actual output is, then promote it.
 
 ### `val foo = <fun>` lines missing
